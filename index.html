@@ -206,9 +206,11 @@ body.sem-codigo header,body.sem-codigo main,body.sem-codigo nav{display:none}
 'use strict';
 
 // Endereço do app da web publicado pelo Apps Script.
-// Deixe vazio e a página pede na primeira abertura de cada aparelho; ou cole
-// aqui, faça o commit, e aí cada celular só precisa do código de acesso.
-const API_URL = '';
+//
+// Fica à vista num site público de propósito: o celular dela não faz login no
+// Google, então a URL precisa estar aqui. A barreira é o código de acesso, que
+// o script confere. Para trocar, publique uma implantação nova e mude aqui.
+const API_URL = 'https://script.google.com/macros/s/AKfycbxthDH9XQAmqyW8q2LZpGBn4STfP5MeeodxKG_TjtVCjHlDU5d4z-vyWTe5orMjlp9FJQ/exec';
 
 // ------------------------------------------------------------- utilidades
 const $ = s => document.querySelector(s);
@@ -266,7 +268,9 @@ let est = recuperar(CACHE, null);     // último estado vindo da planilha
 let fila = recuperar(FILA, []);       // ações ainda não confirmadas
 let aba = 'hoje';
 
-if (API_URL) conf.url = API_URL;
+// Um endereço guardado no aparelho tem prioridade: é o que permite apontar
+// para outra implantação sem mexer no código, e é como os testes rodam.
+if (!conf.url && API_URL) conf.url = API_URL;
 
 const PERIODOS = [['manha', 'Manhã'], ['tarde', 'Tarde'], ['noite', 'Noite'],
                   ['qualquer', 'Qualquer hora']];
@@ -385,11 +389,11 @@ function sair(msg) {
   guardar(CONF, conf); guardar(CACHE, est); guardar(FILA, fila);
   document.body.classList.add('sem-codigo');
   if (msg) $('#entrarErro').textContent = msg;
-  if (API_URL) conf.url = API_URL;
+  if (API_URL) { conf.url = API_URL; guardar(CONF, conf); }
 }
 
 $('#btEntrar').addEventListener('click', async () => {
-  const url = API_URL || $('#inUrl').value.trim();
+  const url = $('#inUrl').value.trim() || conf.url || API_URL;
   const codigo = $('#inCodigo').value.trim().toUpperCase();
   if (!url) { $('#entrarErro').textContent = 'Falta o endereço do app da planilha.'; return; }
   if (!codigo) { $('#entrarErro').textContent = 'Falta o código.'; return; }
@@ -402,7 +406,7 @@ $('#btEntrar').addEventListener('click', async () => {
       $('#entrarErro').textContent = r.erro === 'codigo'
         ? 'Código não reconhecido. Confira na aba Config da planilha.'
         : 'A planilha respondeu: ' + r.erro;
-      conf = API_URL ? { url: API_URL } : {};
+      conf = { url };
       return;
     }
     guardar(CONF, conf);
@@ -413,7 +417,7 @@ $('#btEntrar').addEventListener('click', async () => {
     render();
   } catch {
     $('#entrarErro').textContent = 'Não consegui falar com a planilha. Confira o endereço e a internet.';
-    conf = API_URL ? { url: API_URL } : {};
+    conf = { url };
   }
 });
 
@@ -986,7 +990,7 @@ function telaAjustes(el) {
 // =====================================================================
 // INÍCIO
 // =====================================================================
-if (!API_URL) $('#campoUrl').hidden = false;
+if (!conf.url) $('#campoUrl').hidden = false;
 
 aba = recuperar(ABA, 'hoje');
 

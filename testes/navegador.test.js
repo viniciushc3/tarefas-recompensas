@@ -39,8 +39,10 @@ async function abrir(pagina, base, codigo) {
   const erros = [];
   pagina.on('pageerror', e => erros.push(String(e)));
   pagina.on('console', m => { if (m.type() === 'error') erros.push(m.text()); });
+  // Aponta para a planilha de mentira; em produção vem da constante API_URL.
+  await pagina.addInitScript(
+    url => localStorage.setItem('tr.conf', JSON.stringify({ url })), base + '/api');
   await pagina.goto(base, { waitUntil: 'domcontentloaded' });
-  await pagina.fill('#inUrl', base + '/api');
   await pagina.fill('#inCodigo', codigo);
   await pagina.click('#btEntrar');
   await pagina.waitForSelector('nav button', { state: 'visible', timeout: 15000 });
@@ -127,9 +129,10 @@ test('código errado não entra', async (t) => {
   t.after(async () => { await navegador.close(); servidor.close(); });
 
   const pagina = await navegador.newPage();
+  await pagina.addInitScript(
+    url => localStorage.setItem('tr.conf', JSON.stringify({ url })), base + '/api');
   await pagina.goto(base, { waitUntil: 'domcontentloaded' });
-  await pagina.fill('#inUrl', base + '/api');
-  await pagina.fill('#inCodigo', 'ZZZZZZ');
+  await pagina.fill('#inCodigo', 'ZZZZZZZZ');
   await pagina.click('#btEntrar');
   await pagina.waitForFunction(
     () => document.querySelector('#entrarErro').textContent.includes('não reconhecido'),

@@ -46,13 +46,14 @@ Copie a URL que termina em `/exec`.
 **4. O site.** Em **Settings → Pages** do repositório, ligue o Pages na branch
 `main`. O endereço fica `https://SEU-USUARIO.github.io/tarefas-recompensas/`.
 
-**5. Nos celulares.** Abra o endereço no Chrome, cole a URL do passo 3 e o
-código da pessoa. Depois use **⋮ → Adicionar à tela inicial** — vira ícone e
-abre em tela cheia, igual a um app.
+**5. Nos celulares.** Abra o endereço no Chrome e digite o código da pessoa.
+Depois use **⋮ → Adicionar à tela inicial** — vira ícone e abre em tela cheia,
+igual a um app.
 
-Para não colar a URL em cada aparelho, você pode preenchê-la na constante
-`API_URL` no topo do `<script>` do `index.html` e fazer commit. Aí cada celular
-só precisa do código.
+A URL do passo 3 já está fixa na constante `API_URL`, no topo do `<script>` do
+`index.html`. Se você publicar uma implantação nova, troque ali. Um endereço
+digitado no aparelho tem prioridade sobre o fixo, o que serve para apontar um
+celular para outra planilha sem mexer no código.
 
 ## Viver com isso
 
