@@ -1018,6 +1018,11 @@ function acaoSalvarTarefa(pessoa, cfg, dados) {
 
   if (existente) {
     escreverLinha('Tarefas', existente, campos);
+    if (campos.ativa === 'nao') {
+      removerPendentesFuturas(cfg, existente.id);
+    } else {
+      atualizarPendentes(cfg, existente.id, campos);
+    }
     marcarGeracaoVencida();   // mudou tarefa: o dia precisa ser gerado de novo
     return { id: existente.id, novo: false };
   }
@@ -1028,6 +1033,56 @@ function acaoSalvarTarefa(pessoa, cfg, dados) {
   campos.criada_em = hojeLocal(cfg);
   anexar('Tarefas', campos);
   return { id: campos.id, novo: true };
+}
+
+/**
+ * Leva a mudança da tarefa para as ocorrências que ainda não aconteceram.
+ *
+ * O retrato guardado na ocorrência existe para proteger o HISTÓRICO: mudar o
+ * preço hoje não pode reescrever o que ela ganhou ontem. Mas aplicar isso ao
+ * que ainda está pendente deixa a mudança sem efeito no dia — você liga a
+ * foto numa tarefa e nada acontece até amanhã, que foi o que aconteceu.
+ */
+function atualizarPendentes(cfg, tarefaId, campos) {
+  var hoje = hojeLocal(cfg);
+  ler('Ocorrencias').forEach(function (o) {
+    if (String(o.tarefa_id) !== String(tarefaId)) return;
+    if (o.status !== 'pendente') return;     // decidida guarda o que valia
+    if (String(o.data) < hoje) return;       // dia passado não muda
+    escreverLinha('Ocorrencias', o, {
+      titulo: campos.titulo,
+      icone: campos.icone,
+      pontos: campos.pontos,
+      tipo: campos.tipo,
+      periodo: campos.periodo,
+      conta_mesada: campos.conta_mesada,
+      precisa_aprovacao: campos.precisa_aprovacao,
+      precisa_foto: campos.precisa_foto
+    });
+  });
+}
+
+/**
+ * Tarefa desativada some do dia dela na hora.
+ *
+ * Só apaga ocorrência pendente de hoje em diante: nada aconteceu nelas, então
+ * não há histórico a perder. Deixá-las lá faria a tarefa que você acabou de
+ * tirar continuar pesando no percentual da semana.
+ */
+function removerPendentesFuturas(cfg, tarefaId) {
+  var hoje = hojeLocal(cfg);
+  var linhas = ler('Ocorrencias')
+    .filter(function (o) {
+      return String(o.tarefa_id) === String(tarefaId) &&
+             o.status === 'pendente' && String(o.data) >= hoje;
+    })
+    .map(function (o) { return o._linha; })
+    .sort(function (a, b) { return b - a; });   // de baixo para cima
+
+  var s = aba('Ocorrencias');
+  linhas.forEach(function (linha) { s.deleteRows(linha, 1); });
+  if (linhas.length) delete _cache['Ocorrencias'];
+  return linhas.length;
 }
 
 function acaoSalvarRecompensa(pessoa, cfg, dados) {

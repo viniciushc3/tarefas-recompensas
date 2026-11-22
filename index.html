@@ -146,6 +146,22 @@ label{display:block;font-size:.72rem;font-weight:800;letter-spacing:.06em;text-t
 .editavel + .editavel{margin-top:8px}
 .editavel.off{opacity:.5}
 
+.linha-dia{display:flex;align-items:center;gap:9px;padding:6px 0}
+.linha-dia + .linha-dia{border-top:1px solid var(--line)}
+.marca{width:22px;height:22px;border-radius:7px;flex:none;display:grid;place-items:center;
+  font-size:13px;font-weight:900;background:var(--card2);color:var(--muted)}
+.marca.ok{background:var(--ok);color:#06281b}
+.marca.esp{background:var(--warn-soft);color:var(--warn)}
+.marca.nao{background:var(--bad-soft);color:var(--bad)}
+.tira{display:flex;gap:6px}
+.tira>div{flex:1;text-align:center}
+.tira .col{height:54px;background:var(--card2);border-radius:7px;display:flex;
+  align-items:flex-end;overflow:hidden}
+.tira .col>span{display:block;width:100%;background:var(--ok);border-radius:7px}
+.tira .rot{font-size:.66rem;color:var(--muted);margin-top:4px}
+.tira .num{font-size:.66rem;color:var(--muted)}
+.tira .hoje .rot{color:var(--text);font-weight:800}
+
 #toast{position:fixed;left:50%;bottom:92px;transform:translateX(-50%) translateY(20px);
   background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:11px 16px;
   font-size:.88rem;font-weight:600;z-index:20;opacity:0;pointer-events:none;
@@ -1051,9 +1067,34 @@ function porTrasDoResgate(rg) {
     (!desde || o.decidida_em > desde));
 }
 
+const MARCA = {
+  aprovada: ['ok', '✓'], marcada: ['esp', '⏳'], recusada: ['nao', '✗'],
+  expirada: ['nao', '—'], pendente: ['', ''],
+};
+
+function linhaDoDia(o) {
+  const [cls, sinal] = MARCA[o.status] || ['', ''];
+  const feita = o.status === 'aprovada';
+  return `<div class="linha-dia">
+    <span class="marca ${cls}">${sinal}</span>
+    <span>${esc(o.icone || '⭐')}</span>
+    <span class="grow trunc sm" style="${feita ? 'color:var(--muted)' : ''}">
+      ${esc(o.titulo)}</span>
+    ${o.pontos > 0 ? `<span class="xs" style="color:${feita ? 'var(--ok)' : 'var(--muted)'}">
+      ${feita ? '+' : ''}${o.pontos}</span>` : '<span class="xs muted">dever</span>'}
+  </div>`;
+}
+
 function telaFila(el) {
   const pedidos = est.resgates.filter(r => r.status === 'pedido' || r.status === 'aprovado');
   const marcadas = est.ocorrencias.filter(o => o.status === 'marcada');
+
+  // O dia inteiro, não só o que espera você. Sem isto a sua tela só mostra
+  // pendência, e você nunca vê o que ela já fez.
+  const doDia = est.ocorrencias.filter(o => o.data === est.hoje);
+  const feitas = doDia.filter(o => o.status === 'aprovada').length;
+  const ganhosHoje = doDia
+    .filter(o => o.status === 'aprovada').reduce((t, o) => t + o.pontos, 0);
 
   let html = `<div class="card"><div class="between">
       <span><div class="muted xs">${esc(est.cfg.nomeFilha.toUpperCase())}</div>
@@ -1062,9 +1103,28 @@ function telaFila(el) {
       ${est.streak > 0 ? `<span class="chip warn">🔥 ${est.streak}</span>` : ''}
     </div></div>`;
 
+  if (doDia.length) {
+    html += `<h2>Hoje · ${feitas} de ${doDia.length}</h2>
+      <div class="card">
+        <div class="barra v" style="margin-bottom:10px">
+          <div style="width:${(feitas / doDia.length) * 100}%"></div></div>
+        ${PERIODOS.map(([id, nome]) => {
+          const itens = doDia.filter(o => (o.periodo || 'qualquer') === id);
+          if (!itens.length) return '';
+          return `<div class="muted xs" style="margin:10px 0 2px;font-weight:800;
+            letter-spacing:.06em">${esc(nome.toUpperCase())}</div>` +
+            itens.map(linhaDoDia).join('');
+        }).join('')}
+        ${ganhosHoje ? `<p class="muted xs" style="margin:10px 0 0">
+          ${ganhosHoje} pontos ganhos hoje.</p>` : ''}
+      </div>`;
+  }
+
   if (!pedidos.length && !marcadas.length) {
-    html += vazio('☕', 'Nada esperando',
-      'Quando ela marcar algo ou pedir uma recompensa, aparece aqui.');
+    html += `<div class="aviso ok" style="margin-top:18px">
+      Nada esperando você. ${doDia.length && feitas === doDia.length
+        ? 'E ela fechou o dia 🎉' : 'Quando ela marcar algo ou pedir uma recompensa, aparece aqui.'}
+    </div>`;
   }
 
   if (pedidos.length) {
@@ -1207,6 +1267,28 @@ function telaSemana(el) {
 
   html += `<button class="bt" style="margin-top:12px" id="btFechar">
     ${fechada ? 'Recalcular a semana' : 'Fechar a semana'}</button></div>`;
+
+  // Os sete dias de relance: onde ela está firme e onde furou.
+  const dias = [];
+  for (let i = 0; i < 7; i++) {
+    const dia = somarDias(est.semana, i);
+    const doDia = est.ocorrencias.filter(o => o.data === dia && o.conta_mesada);
+    const ok = doDia.filter(o => o.status === 'aprovada').length;
+    dias.push({ dia, total: doDia.length, ok });
+  }
+  if (dias.some(d => d.total)) {
+    html += `<h2>Os sete dias</h2><div class="card"><div class="tira">
+      ${dias.map(d => {
+        const fr = d.total ? d.ok / d.total : 0;
+        const letra = ['S', 'T', 'Q', 'Q', 'S', 'S', 'D'][dias.indexOf(d)];
+        return `<div class="${d.dia === est.hoje ? 'hoje' : ''}">
+          <div class="col"><span style="height:${Math.round(fr * 100)}%"></span></div>
+          <div class="rot">${letra}</div>
+          <div class="num">${d.total ? d.ok + '/' + d.total : '–'}</div>
+        </div>`;
+      }).join('')}
+    </div></div>`;
+  }
 
   if (est.semanas.length) {
     html += '<h2>Semanas fechadas</h2>';

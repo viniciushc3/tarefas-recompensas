@@ -113,9 +113,17 @@ test('a filha marca uma tarefa e o pai a vê na fila', async (t) => {
   await pSeu.click('[data-oc-sim]');
   // Esperar por condição, não por relógio: com a máquina ocupada, tempo fixo
   // é a receita de teste que falha uma vez em dez.
+  //
+  // O que tem de sumir é o botão de aprovar. O nome da tarefa continua na
+  // tela, no resumo do dia, agora marcada como feita.
   await pSeu.waitForFunction(
-    () => !document.querySelector('#v-fila').textContent.includes('Lavar a louça'),
+    () => document.querySelectorAll('[data-oc-sim]').length === 0,
     null, { timeout: 15000 });
+  const resumo = await pSeu.textContent('#v-fila');
+  assert.match(resumo, /Hoje · 2 de \d+/,
+    'o resumo do dia deveria contar as duas feitas (a que ela marcou e a que você aprovou)');
+  assert.match(resumo, /Lavar a louça/,
+    'a tarefa aprovada tem de continuar visível, agora como feita');
 
   for (const aba of ['Semana', 'Extrato', 'Ajustes']) {
     await pSeu.click(`nav button:has-text("${aba}")`);

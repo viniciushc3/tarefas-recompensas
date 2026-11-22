@@ -475,21 +475,27 @@ test('meta grande é forçada para o cofrinho', () => {
   assert.equal(r.bolso, 'cofrinho', 'meta não pode sair do saldo gastável');
 });
 
-test('desativar tarefa para de gerar mas mantém o histórico', () => {
+test('desativar tarefa para de gerar e tira a pendente do dia', () => {
   const { api, cfg } = montar();
   let e = estado(api, cfg.codigoPai);
   const alvo = e.tarefas.find(t => t.titulo === 'Pôr a mesa');
-  const antes = api.ler('Ocorrencias').filter(o => o.titulo === 'Pôr a mesa').length;
-  assert.ok(antes > 0);
+  assert.ok(api.ler('Ocorrencias').some(o => o.titulo === 'Pôr a mesa'));
 
   estado(api, cfg.codigoPai, [{
     acao: 'salvarTarefa', tarefa: { ...alvo, ativa: false }, ref: 0,
   }]);
-  const depois = api.ler('Ocorrencias').filter(o => o.titulo === 'Pôr a mesa').length;
-  assert.equal(depois, antes, 'o histórico sumiu');
+
+  // Nada tinha acontecido nela hoje, então não há histórico a perder — e
+  // deixá-la lá faria a tarefa recém-tirada continuar pesando na semana.
+  assert.ok(!api.ler('Ocorrencias').some(o => o.titulo === 'Pôr a mesa'),
+    'a pendente de hoje continuou no dia dela');
 
   e = estado(api, cfg.codigoPai);
   assert.equal(e.tarefas.find(t => t.id === alvo.id).ativa, false);
+
+  // E não volta a nascer.
+  estado(api, cfg.codigoFilha);
+  assert.ok(!api.ler('Ocorrencias').some(o => o.titulo === 'Pôr a mesa'));
 });
 
 // ------------------------------------------------- os dois bugs de produção
@@ -957,4 +963,75 @@ test('a versão do script viaja para o app e para o diagnóstico', () => {
   const e = estado(api, cfg.codigoFilha);
   assert.match(e.versao, /^\d{4}-\d{2}-\d{2}\.\d+$/, 'versão: ' + e.versao);
   assert.match(api.diagnostico(), new RegExp('Versão do script: ' + e.versao));
+});
+
+test('ligar a foto numa tarefa vale já para hoje', () => {
+  // Era o caso real: a foto foi ligada em "Lavar a louça" e a tarefa de hoje
+  // continuou sem pedir foto, porque a ocorrência guarda o retrato do dia em
+  // que nasceu. Retrato protege histórico, não o que ainda está pendente.
+  const { api, cfg } = montar();
+  let e = estado(api, cfg.codigoPai);
+  const t = e.tarefas.find(x => x.titulo === 'Lavar a louça');
+  assert.equal(t.precisa_foto, false);
+
+  estado(api, cfg.codigoPai, [{
+    acao: 'salvarTarefa', ref: 0, tarefa: { ...t, precisa_foto: true },
+  }]);
+
+  e = estado(api, cfg.codigoFilha);
+  const oc = e.ocorrencias.find(o => o.titulo === 'Lavar a louça' && o.data === e.hoje);
+  assert.equal(oc.precisa_foto, true, 'a tarefa de hoje continuou sem pedir foto');
+
+  const r = estado(api, cfg.codigoFilha, [{ acao: 'marcar', id: oc.id, ref: 0 }]);
+  assert.equal(r.resultados[0].ok, false);
+  assert.match(r.resultados[0].erro, /precisa de foto/);
+});
+
+test('mudar pontos vale para hoje, mas não reescreve o que já foi feito', () => {
+  const { api, cfg } = montar();
+  let e = estado(api, cfg.codigoPai);
+  const t = e.tarefas.find(x => x.titulo === 'Tirar o lixo');
+  const feita = e.ocorrencias.find(o => o.titulo === 'Pôr a mesa' && o.data === e.hoje);
+  estado(api, cfg.codigoFilha, [{ acao: 'marcar', id: feita.id, ref: 0 }]);
+
+  estado(api, cfg.codigoPai, [{
+    acao: 'salvarTarefa', ref: 0, tarefa: { ...t, pontos: 50 },
+  }]);
+  e = estado(api, cfg.codigoPai);
+
+  const pendente = e.ocorrencias.find(o => o.titulo === 'Tirar o lixo' && o.data === e.hoje);
+  assert.equal(pendente.pontos, 50, 'a pendente de hoje ficou com o preço velho');
+  assert.deepEqual(e.saldo, { gastavel: 14, cofrinho: 6 }, 'o que já foi pago mudou');
+});
+
+test('desativar tarefa some do dia dela na hora', () => {
+  const { api, cfg } = montar();
+  let e = estado(api, cfg.codigoPai);
+  const t = e.tarefas.find(x => x.titulo === 'Tirar o lixo');
+  const antes = e.resumoSemana.elegiveis;
+
+  estado(api, cfg.codigoPai, [{
+    acao: 'salvarTarefa', ref: 0, tarefa: { ...t, ativa: false },
+  }]);
+
+  e = estado(api, cfg.codigoFilha);
+  assert.ok(!e.ocorrencias.some(o => o.titulo === 'Tirar o lixo' && o.data === e.hoje),
+    'a tarefa desativada continuou no dia dela');
+  assert.equal(e.resumoSemana.elegiveis, antes - 1,
+    'continuou pesando no percentual da semana');
+});
+
+test('desativar não apaga o que já foi feito', () => {
+  const { api, cfg } = montar();
+  let e = estado(api, cfg.codigoPai);
+  const oc = e.ocorrencias.find(o => o.titulo === 'Tirar o lixo' && o.data === e.hoje);
+  estado(api, cfg.codigoFilha, [{ acao: 'marcar', id: oc.id, ref: 0 }]);
+
+  const t = e.tarefas.find(x => x.titulo === 'Tirar o lixo');
+  estado(api, cfg.codigoPai, [{ acao: 'salvarTarefa', ref: 0, tarefa: { ...t, ativa: false } }]);
+
+  e = estado(api, cfg.codigoPai);
+  assert.ok(e.ocorrencias.some(o => o.titulo === 'Tirar o lixo' && o.status === 'aprovada'),
+    'apagou uma tarefa já feita');
+  assert.deepEqual(e.saldo, { gastavel: 14, cofrinho: 6 }, 'tirou os pontos dela');
 });

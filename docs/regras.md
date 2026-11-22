@@ -82,7 +82,7 @@ instala, os 14 dias anteriores nasceriam e expirariam como não feitos, e a
 primeira semana apareceria como 11% cumprida — parecendo fracasso antes de ela
 ter tido chance de fazer qualquer coisa.
 
-## Snapshots
+## Snapshots, e o que eles NÃO devem congelar
 
 Cada ocorrência guarda o título, o emoji, os pontos e as regras **do dia em que
 nasceu**. Mudar o preço de uma tarefa hoje não reescreve o histórico de ontem.
@@ -90,6 +90,15 @@ Vale o mesmo para resgates.
 
 Isso importa na prática porque você vai mexer nos preços várias vezes no
 primeiro mês.
+
+Mas o retrato protege **histórico**, não o que ainda está pendente. Mudar uma
+tarefa atualiza as ocorrências ainda `pendente` de hoje em diante — senão você
+liga a foto numa tarefa e nada acontece até amanhã. As já decididas ficam como
+estavam.
+
+Desativar uma tarefa apaga suas ocorrências pendentes de hoje em diante: nada
+aconteceu nelas, e deixá-las lá faria a tarefa recém-tirada continuar pesando
+no percentual da semana.
 
 ## Extrato só cresce
 
