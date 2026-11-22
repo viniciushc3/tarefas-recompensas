@@ -286,3 +286,38 @@ test('a primeira semana não começa parecendo fracasso', () => {
   assert.equal(e.resumoSemana.aprovadas, 0);
   assert.equal(e.resumoSemana.emAberto, e.resumoSemana.elegiveis);
 });
+
+test('instalar funciona mesmo com getSheetByName quebrado', () => {
+  // Regressão: em produção, numa planilha recém-criada, getSheetByName()
+  // estourou "Planilha 0 não encontrada" e instalar() morria na primeira aba.
+  // A planilha de mentira faz esse método sempre estourar; se o código voltar
+  // a usá-lo, este teste cai.
+  const api = criarAmbiente();
+  assert.throws(() => api._ambiente.SpreadsheetApp.getActive().getSheetByName('Config'),
+    /Planilha 0 não encontrada/, 'a planilha falsa deveria estourar');
+  api.instalar();
+  Object.keys(api.ABAS).forEach(nome => {
+    assert.ok(api._ambiente._abas.has(nome), 'falta a aba ' + nome);
+  });
+});
+
+test('instalar remove a aba padrão vazia e não toca em aba com conteúdo', () => {
+  const api = criarAmbiente();
+  api.instalar();
+  assert.equal(api._ambiente._abas.has('Página1'), false, 'a aba padrão vazia deveria sumir');
+
+  const outra = criarAmbiente();
+  outra._ambiente._abas.get('Página1').appendRow(['anotação importante']);
+  outra.instalar();
+  assert.equal(outra._ambiente._abas.has('Página1'), true,
+    'não pode apagar aba com conteúdo');
+});
+
+test('diagnóstico lista o que o script enxerga', () => {
+  const api = criarAmbiente();
+  const antes = api.diagnostico();
+  assert.match(antes, /Planilha sem título/);
+  assert.match(antes, /Faltam: /, 'antes de instalar, deveria listar o que falta');
+  api.instalar();
+  assert.match(api.diagnostico(), /Todas as abas existem/);
+});

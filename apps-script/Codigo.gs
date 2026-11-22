@@ -169,9 +169,22 @@ function saldoDe(extrato) {
 
 function ss() { return SpreadsheetApp.getActive(); }
 
+/**
+ * Procura a aba percorrendo getSheets() em vez de usar getSheetByName().
+ * São 8 abas, o custo é irrelevante, e getSheetByName() se mostrou capaz de
+ * falhar em planilha recém-criada ("Planilha 0 não encontrada").
+ */
+function procurarAba(planilha, nome) {
+  var todas = planilha.getSheets();
+  for (var i = 0; i < todas.length; i++) {
+    if (todas[i].getName() === nome) return todas[i];
+  }
+  return null;
+}
+
 function aba(nome) {
-  var s = ss().getSheetByName(nome);
-  if (!s) throw new Error('aba ' + nome + ' não existe — rode instalar()');
+  var s = procurarAba(ss(), nome);
+  if (!s) throw new Error('a aba ' + nome + ' não existe — rode instalar()');
   return s;
 }
 
@@ -654,18 +667,38 @@ function doPost(e) {
 
 function instalar() {
   var planilha = ss();
+  if (!planilha) {
+    throw new Error(
+      'Este script não está preso a nenhuma planilha. Ele precisa ser criado de ' +
+      'dentro dela: abra a planilha e vá em Extensões > Apps Script. Um script ' +
+      'criado direto em script.google.com não enxerga planilha nenhuma.');
+  }
+
+  // Monta o índice uma vez só, a partir da lista real de abas.
+  var existentes = {};
+  planilha.getSheets().forEach(function (s) { existentes[s.getName()] = s; });
 
   Object.keys(ABAS).forEach(function (nome) {
-    var s = planilha.getSheetByName(nome);
-    if (!s) s = planilha.insertSheet(nome);
+    var s = existentes[nome];
+    if (!s) {
+      s = planilha.insertSheet(nome);
+      existentes[nome] = s;
+    }
     if (s.getLastRow() === 0) {
       s.getRange(1, 1, 1, ABAS[nome].length).setValues([ABAS[nome]]).setFontWeight('bold');
       s.setFrozenRows(1);
     }
   });
 
-  var padrao = planilha.getSheetByName('Sheet1') || planilha.getSheetByName('Página1');
-  if (padrao && planilha.getSheets().length > 1) planilha.deleteSheet(padrao);
+  // Remove a aba padrão vazia, se sobrou. Só se estiver realmente vazia:
+  // apagar aba com conteúdo de alguém seria péssimo.
+  ['Sheet1', 'Página1', 'Planilha1'].forEach(function (nome) {
+    var padrao = existentes[nome];
+    if (padrao && padrao.getLastRow() === 0 && planilha.getSheets().length > 1) {
+      planilha.deleteSheet(padrao);
+      delete existentes[nome];
+    }
+  });
 
   if (ler('Config').length === 0) {
     var codigoPai = novoCodigo();
@@ -780,6 +813,40 @@ function semearRecompensas() {
   });
 }
 
+/**
+ * Rode isto se instalar() falhar: diz exatamente o que o script está enxergando.
+ * O resultado aparece no registro de execução (Ctrl+Enter no editor).
+ */
+function diagnostico() {
+  var linhas = [];
+  var planilha = null;
+  try { planilha = SpreadsheetApp.getActive(); } catch (e) {
+    linhas.push('getActive() deu erro: ' + e.message);
+  }
+
+  if (!planilha) {
+    linhas.push('SpreadsheetApp.getActive() devolveu vazio.');
+    linhas.push('O script não está preso a uma planilha. Crie-o por');
+    linhas.push('Extensões > Apps Script de dentro da planilha.');
+  } else {
+    linhas.push('Planilha: ' + planilha.getName());
+    linhas.push('Endereço: ' + planilha.getUrl());
+    var nomes = planilha.getSheets().map(function (s) {
+      return s.getName() + ' (' + s.getLastRow() + ' linhas)';
+    });
+    linhas.push('Abas (' + nomes.length + '): ' + (nomes.join(', ') || 'nenhuma'));
+    var faltando = Object.keys(ABAS).filter(function (n) {
+      return !procurarAba(planilha, n);
+    });
+    linhas.push(faltando.length ? 'Faltam: ' + faltando.join(', ') : 'Todas as abas existem.');
+  }
+
+  var texto = linhas.join('\n');
+  Logger.log(texto);
+  try { SpreadsheetApp.getUi().alert(texto); } catch (e) {}
+  return texto;
+}
+
 /** Atalho no menu da planilha, para não precisar abrir o editor. */
 function onOpen() {
   try {
@@ -787,6 +854,7 @@ function onOpen() {
       .addItem('Instalar / conferir abas', 'instalar')
       .addItem('Gerar dias de hoje', 'gerarAgora')
       .addItem('Ver códigos de acesso', 'verCodigos')
+      .addItem('Diagnóstico', 'diagnostico')
       .addToUi();
   } catch (e) {}
 }

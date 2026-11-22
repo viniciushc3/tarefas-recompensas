@@ -47,9 +47,16 @@ function criarAba(nome) {
 
 function criarAmbiente({ fuso = 'America/Sao_Paulo' } = {}) {
   const abas = new Map();
+  // Planilha nova de verdade vem com a aba padrão.
+  abas.set('Página1', criarAba('Página1'));
+
   const planilha = {
+    getName: () => 'Planilha sem título',
     getUrl: () => 'https://docs.google.com/spreadsheets/d/falsa/edit',
-    getSheetByName: n => abas.get(n) || null,
+    // Reproduz o erro que apareceu em produção: numa planilha recém-criada,
+    // getSheetByName() estourou "Planilha 0 não encontrada". O código não pode
+    // mais depender dela — se voltar a usar, os testes quebram aqui.
+    getSheetByName() { throw new Error('Planilha 0 não encontrada'); },
     insertSheet(n) { const a = criarAba(n); abas.set(n, a); return a; },
     getSheets: () => [...abas.values()],
     deleteSheet(a) { abas.delete(a.getName()); },
@@ -104,7 +111,8 @@ function criarAmbiente({ fuso = 'America/Sao_Paulo' } = {}) {
   const nomes = Object.keys(ambiente);
   const criar = new Function(...nomes, fonte + `
     return { instalar, doPost, doGet, config, ler, garantirDias, hojeLocal,
-             inicioDaSemana, somarDias, escrever, anexar, saldoDe, ABAS };
+             inicioDaSemana, somarDias, escrever, anexar, saldoDe, diagnostico,
+             procurarAba, ABAS };
   `);
   const api = criar(...nomes.map(n => ambiente[n]));
 
