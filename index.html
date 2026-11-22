@@ -1,0 +1,1008 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0d13">
+<title>Tarefas</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Tarefas">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✅</text></svg>">
+<style>
+:root{
+  color-scheme: dark;
+  --bg:#0b0d13; --card:#141824; --card2:#1c2131; --text:#eef0f6; --muted:#8c93a8;
+  --line:rgba(255,255,255,.08);
+  --accent:#7c6bff; --accent2:#a78bfa; --accent-soft:rgba(124,107,255,.15);
+  --cofre:#38bdf8; --cofre-soft:rgba(56,189,248,.14);
+  --ok:#34d399; --ok-soft:rgba(52,211,153,.14);
+  --warn:#fbbf24; --warn-soft:rgba(251,191,36,.14);
+  --bad:#f87171; --bad-soft:rgba(248,113,113,.14);
+  --r:18px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.45 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+body{background:radial-gradient(1100px 480px at 85% -10%,rgba(124,107,255,.16),transparent 60%),
+  radial-gradient(900px 400px at -10% 8%,rgba(56,189,248,.08),transparent 60%),var(--bg);
+  background-attachment:fixed;min-height:100vh}
+button{font:inherit}
+
+header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;
+  padding:14px 16px;padding-top:max(14px,env(safe-area-inset-top));
+  background:rgba(11,13,19,.74);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+  border-bottom:1px solid var(--line)}
+.logo{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-size:20px;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  box-shadow:0 6px 20px rgba(124,107,255,.35)}
+header .ttl{flex:1;min-width:0}
+header h1{margin:0;font-size:1.05rem;font-weight:800;letter-spacing:-.01em}
+header small{color:var(--muted);font-size:.8rem}
+#syncSt{font-size:.72rem;color:var(--muted);background:var(--card);border:1px solid var(--line);
+  padding:5px 10px;border-radius:99px;white-space:nowrap;max-width:40%;overflow:hidden;
+  text-overflow:ellipsis}
+#syncSt:empty{display:none}
+#syncSt[data-s=warn]{color:var(--warn);border-color:rgba(251,191,36,.3)}
+#syncSt[data-s=bad]{color:var(--bad);border-color:rgba(248,113,113,.3)}
+#syncSt[data-s=ok]{color:var(--ok);border-color:rgba(52,211,153,.25)}
+
+main{max-width:640px;margin:0 auto;padding:18px 16px 110px}
+nav{position:fixed;bottom:max(12px,env(safe-area-inset-bottom));left:50%;
+  transform:translateX(-50%);width:calc(100% - 24px);max-width:520px;z-index:5;
+  display:flex;gap:2px;padding:6px;background:rgba(24,28,40,.86);
+  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  border:1px solid var(--line);border-radius:22px;box-shadow:0 12px 40px rgba(0,0,0,.5)}
+nav button{flex:1;border:0;background:none;color:var(--muted);padding:8px 2px;border-radius:16px;
+  font-size:.68rem;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:3px;
+  transition:background .2s,color .2s}
+nav button i{font-style:normal;font-size:19px;line-height:1}
+nav button.on{color:var(--text);background:var(--accent-soft)}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px}
+.card + .card{margin-top:12px}
+h2{font-size:.78rem;font-weight:800;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--muted);margin:26px 0 10px}
+h2:first-child{margin-top:0}
+.muted{color:var(--muted)}
+.sm{font-size:.84rem}
+.xs{font-size:.76rem}
+.row{display:flex;align-items:center;gap:10px}
+.between{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.grow{flex:1;min-width:0}
+.wrap{flex-wrap:wrap}
+.trunc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.chip{display:inline-block;font-size:.72rem;font-weight:700;padding:3px 9px;border-radius:99px;
+  background:var(--card2);color:var(--muted)}
+.chip.acc{background:var(--accent-soft);color:var(--accent2)}
+.chip.ok{background:var(--ok-soft);color:var(--ok)}
+.chip.warn{background:var(--warn-soft);color:var(--warn)}
+.chip.bad{background:var(--bad-soft);color:var(--bad)}
+.chip.cofre{background:var(--cofre-soft);color:var(--cofre)}
+
+.bt{border:0;border-radius:14px;padding:12px 16px;font-weight:700;color:#fff;
+  background:var(--accent);width:100%;transition:opacity .15s,transform .1s}
+.bt:active{transform:scale(.985);opacity:.85}
+.bt.ok{background:var(--ok);color:#06281b}
+.bt.ghost{background:var(--card2);color:var(--text)}
+.bt.bad{background:var(--bad-soft);color:var(--bad)}
+.bt[disabled]{opacity:.4}
+.bts{display:flex;gap:8px}
+.bts .bt{flex:1}
+
+/* saldos */
+.saldos{display:flex;gap:12px}
+.saldo{flex:1;border-radius:var(--r);padding:14px}
+.saldo.g{background:var(--accent-soft)}
+.saldo.c{background:var(--cofre-soft)}
+.saldo .rot{font-size:.68rem;font-weight:800;letter-spacing:.08em}
+.saldo .val{font-size:1.9rem;font-weight:800;line-height:1.1;margin-top:2px}
+.saldo.g .rot,.saldo.g .val{color:var(--accent2)}
+.saldo.c .rot,.saldo.c .val{color:var(--cofre)}
+.saldo .eq{font-size:.76rem;opacity:.85;margin-top:1px}
+
+.barra{height:10px;background:var(--card2);border-radius:99px;overflow:hidden}
+.barra>div{height:100%;background:var(--accent);border-radius:99px;transition:width .35s}
+.barra.c>div{background:var(--cofre)}
+.barra.v>div{background:var(--ok)}
+.barra.alta{height:16px}
+
+/* tarefa */
+.tarefa{display:flex;align-items:center;gap:12px;background:var(--card);
+  border:1.5px solid var(--line);border-radius:var(--r);padding:14px;width:100%;
+  text-align:left;color:var(--text);transition:transform .1s,opacity .15s}
+.tarefa:active{transform:scale(.985)}
+.tarefa.feita{background:var(--ok-soft);border-color:rgba(52,211,153,.4)}
+.tarefa.esperando{background:var(--warn-soft);border-color:rgba(251,191,36,.4)}
+.tarefa.recusada{border-color:rgba(248,113,113,.45)}
+.tarefa + .tarefa{margin-top:8px}
+.box{width:32px;height:32px;border-radius:10px;border:2.5px solid var(--line);flex:none;
+  display:grid;place-items:center;font-size:17px;font-weight:900}
+.tarefa.feita .box{background:var(--ok);border-color:var(--ok);color:#06281b}
+.tarefa.esperando .box{border-color:var(--warn)}
+.tarefa .ico{font-size:20px;flex:none}
+.tarefa .tit{font-weight:600}
+.tarefa.feita .tit{text-decoration:line-through;color:var(--muted)}
+.tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+
+.vazio{text-align:center;padding:48px 16px;color:var(--muted)}
+.vazio .em{font-size:44px;display:block;margin-bottom:8px}
+.vazio b{color:var(--text);display:block;font-size:1.05rem;margin-bottom:4px}
+
+.aviso{border-radius:14px;padding:11px 13px;font-size:.86rem;font-weight:600}
+.aviso.warn{background:var(--warn-soft);color:var(--warn)}
+.aviso.bad{background:var(--bad-soft);color:var(--bad)}
+.aviso.ok{background:var(--ok-soft);color:var(--ok)}
+
+input,textarea{width:100%;background:var(--card2);border:1px solid var(--line);border-radius:12px;
+  padding:12px;color:var(--text);font:inherit}
+input::placeholder,textarea::placeholder{color:var(--muted)}
+label{display:block;font-size:.72rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--muted);margin:0 0 6px}
+.campo + .campo{margin-top:12px}
+
+#toast{position:fixed;left:50%;bottom:92px;transform:translateX(-50%) translateY(20px);
+  background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:11px 16px;
+  font-size:.88rem;font-weight:600;z-index:20;opacity:0;pointer-events:none;
+  transition:opacity .2s,transform .2s;max-width:calc(100% - 32px);text-align:center;
+  box-shadow:0 10px 30px rgba(0,0,0,.5)}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* tela de entrada */
+#entrar{display:none;max-width:420px;margin:0 auto;padding:40px 20px}
+body.sem-codigo #entrar{display:block}
+body.sem-codigo header,body.sem-codigo main,body.sem-codigo nav{display:none}
+#entrar .em{font-size:52px}
+#entrar h1{font-size:1.6rem;margin:10px 0 6px}
+.codigo{text-transform:uppercase;letter-spacing:.3em;text-align:center;font-size:1.3rem;
+  font-weight:800}
+.view{display:none}
+.view.on{display:block}
+</style>
+</head>
+<body class="sem-codigo">
+
+<section id="entrar">
+  <span class="em">🏡</span>
+  <h1>Tarefas</h1>
+  <p class="muted sm" id="entrarTxt">Digite o código de acesso do seu aparelho.</p>
+  <div class="campo" id="campoUrl" hidden>
+    <label>Endereço do app da planilha</label>
+    <input id="inUrl" placeholder="https://script.google.com/macros/s/.../exec" autocapitalize="off" autocomplete="off" spellcheck="false">
+  </div>
+  <div class="campo">
+    <label>Código de acesso</label>
+    <input id="inCodigo" class="codigo" placeholder="ABCD2345" maxlength="12" autocapitalize="characters" autocomplete="off" spellcheck="false">
+  </div>
+  <div class="campo"><button class="bt" id="btEntrar">Entrar</button></div>
+  <p class="muted xs" id="entrarErro"></p>
+</section>
+
+<header>
+  <div class="logo" id="logo">✅</div>
+  <div class="ttl">
+    <h1 id="titulo">Tarefas</h1>
+    <small id="subtitulo"></small>
+  </div>
+  <span id="syncSt"></span>
+</header>
+
+<main>
+  <div class="view" id="v-hoje"></div>
+  <div class="view" id="v-loja"></div>
+  <div class="view" id="v-meta"></div>
+  <div class="view" id="v-extrato"></div>
+  <div class="view" id="v-fila"></div>
+  <div class="view" id="v-semana"></div>
+  <div class="view" id="v-ajustes"></div>
+</main>
+
+<nav id="nav"></nav>
+<div id="toast"></div>
+
+<script>
+'use strict';
+
+// Endereço do app da web publicado pelo Apps Script.
+// Deixe vazio e a página pede na primeira abertura de cada aparelho; ou cole
+// aqui, faça o commit, e aí cada celular só precisa do código de acesso.
+const API_URL = '';
+
+// ------------------------------------------------------------- utilidades
+const $ = s => document.querySelector(s);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,
+  c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+let toastTimer;
+function toast(msg) {
+  const el = $('#toast');
+  el.textContent = msg;
+  el.classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('on'), 3200);
+}
+
+function status(txt, s) {
+  const el = $('#syncSt');
+  el.textContent = txt || '';
+  if (s) el.dataset.s = s; else delete el.dataset.s;
+}
+
+function guardar(chave, valor) {
+  try { localStorage.setItem(chave, JSON.stringify(valor)); } catch {}
+}
+function recuperar(chave, padrao) {
+  try { return JSON.parse(localStorage.getItem(chave)) ?? padrao; } catch { return padrao; }
+}
+
+const dinheiro = v => (Number(v) || 0).toLocaleString('pt-BR',
+  { style: 'currency', currency: 'BRL' });
+
+function somarDias(iso, dias) {
+  const [a, m, d] = iso.split('-').map(Number);
+  return new Date(Date.UTC(a, m - 1, d) + dias * 86400000).toISOString().slice(0, 10);
+}
+function diffDias(de, para) {
+  const p = s => { const [a, m, d] = s.split('-').map(Number); return Date.UTC(a, m - 1, d); };
+  return Math.round((p(para) - p(de)) / 86400000);
+}
+const DIAS = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+function rotuloDia(iso, hoje) {
+  const d = diffDias(iso, hoje);
+  if (d === 0) return 'hoje';
+  if (d === 1) return 'ontem';
+  const [a, m, dd] = iso.split('-').map(Number);
+  const dow = new Date(Date.UTC(a, m - 1, dd)).getUTCDay();
+  return DIAS[dow] + ', ' + String(dd).padStart(2, '0') + '/' + String(m).padStart(2, '0');
+}
+
+// ------------------------------------------------------- estado local
+const CONF = 'tr.conf', CACHE = 'tr.cache', FILA = 'tr.fila', ABA = 'tr.aba';
+
+let conf = recuperar(CONF, {});
+let est = recuperar(CACHE, null);     // último estado vindo da planilha
+let fila = recuperar(FILA, []);       // ações ainda não confirmadas
+let aba = 'hoje';
+
+if (API_URL) conf.url = API_URL;
+
+const PERIODOS = [['manha', 'Manhã'], ['tarde', 'Tarde'], ['noite', 'Noite'],
+                  ['qualquer', 'Qualquer hora']];
+
+// --------------------------------------------------------------- rede
+// text/plain de propósito: evita a verificação CORS prévia, que o Apps Script
+// não responde.
+async function postar(corpo) {
+  const r = await fetch(conf.url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(corpo),
+  });
+  return r.json();
+}
+
+let sincronizando = false, timerSync = null;
+
+function agendar(ms = 600) {
+  clearTimeout(timerSync);
+  timerSync = setTimeout(sincronizar, ms);
+  mostrarStatus();
+}
+
+function mostrarStatus() {
+  if (!conf.codigo) return;
+  if (sincronizando) return status('Enviando…', 'warn');
+  if (fila.length) return status(fila.length + ' esperando internet', 'warn');
+  status('Em dia', 'ok');
+}
+
+/**
+ * Manda a fila inteira e recebe o estado novo.
+ *
+ * A planilha é a verdade; a fila é só o que ainda não chegou lá. Erro de regra
+ * (fora do prazo, já decidida) descarta o item — insistir não ajudaria. Erro de
+ * rede mantém, para tentar depois.
+ */
+async function sincronizar() {
+  if (!conf.url || !conf.codigo || sincronizando) return;
+  sincronizando = true;
+  mostrarStatus();
+  const enviadas = fila.slice();
+  try {
+    const r = await postar({
+      codigo: conf.codigo,
+      acoes: enviadas.map((a, i) => ({ ...a, ref: i })),
+    });
+
+    if (!r.ok) {
+      sincronizando = false;
+      if (r.erro === 'codigo') { sair('Código de acesso inválido.'); return; }
+      status('A planilha recusou', 'bad');
+      toast('A planilha recusou: ' + r.erro);
+      return;
+    }
+
+    // Tira da fila o que o servidor processou, com sucesso ou com erro de regra.
+    const processadas = new Set((r.resultados || []).map(x => x.ref));
+    fila = fila.filter((_, i) => !processadas.has(i));
+    guardar(FILA, fila);
+
+    (r.resultados || []).forEach(x => {
+      if (!x.ok) toast('Não deu: ' + x.erro);
+    });
+
+    est = r;
+    guardar(CACHE, est);
+    render();
+  } catch {
+    status('Sem conexão · fila guardada', 'bad');
+  }
+  sincronizando = false;
+  mostrarStatus();
+}
+
+function enfileirar(acao) {
+  fila.push(acao);
+  guardar(FILA, fila);
+  agendar();
+}
+
+window.addEventListener('online', () => { if (fila.length) sincronizar(); });
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && conf.codigo) sincronizar();
+});
+
+// -------------------------------------------------------- otimismo local
+/** Mostra o efeito antes de o servidor confirmar, para o toque não parecer falho. */
+function marcarLocal(oc) {
+  oc.status = oc.precisa_aprovacao ? 'marcada' : 'aprovada';
+  oc._pendente = true;
+  if (oc.status === 'aprovada' && oc.pontos > 0) {
+    const cofre = Math.floor(oc.pontos * (est.cfg.taxaCofrinho || 0.3));
+    est.saldo.gastavel += oc.pontos - cofre;
+    est.saldo.cofrinho += cofre;
+  }
+  guardar(CACHE, est);
+}
+
+function pedirLocal(rec) {
+  const campo = rec.bolso === 'cofrinho' ? 'cofrinho' : 'gastavel';
+  est.saldo[campo] -= rec.custo;
+  est.resgates.push({
+    id: 'local-' + Date.now(), quando: '', titulo: rec.titulo, custo: rec.custo,
+    bolso: rec.bolso, minutos: rec.minutos, status: 'pedido', _pendente: true,
+  });
+  guardar(CACHE, est);
+}
+
+// ------------------------------------------------------------- entrada
+function sair(msg) {
+  conf = {};
+  est = null;
+  fila = [];
+  guardar(CONF, conf); guardar(CACHE, est); guardar(FILA, fila);
+  document.body.classList.add('sem-codigo');
+  if (msg) $('#entrarErro').textContent = msg;
+  if (API_URL) conf.url = API_URL;
+}
+
+$('#btEntrar').addEventListener('click', async () => {
+  const url = API_URL || $('#inUrl').value.trim();
+  const codigo = $('#inCodigo').value.trim().toUpperCase();
+  if (!url) { $('#entrarErro').textContent = 'Falta o endereço do app da planilha.'; return; }
+  if (!codigo) { $('#entrarErro').textContent = 'Falta o código.'; return; }
+
+  $('#entrarErro').textContent = 'Conferindo…';
+  conf = { url, codigo };
+  try {
+    const r = await postar({ codigo, acoes: [] });
+    if (!r.ok) {
+      $('#entrarErro').textContent = r.erro === 'codigo'
+        ? 'Código não reconhecido. Confira na aba Config da planilha.'
+        : 'A planilha respondeu: ' + r.erro;
+      conf = API_URL ? { url: API_URL } : {};
+      return;
+    }
+    guardar(CONF, conf);
+    est = r; guardar(CACHE, est);
+    document.body.classList.remove('sem-codigo');
+    $('#entrarErro').textContent = '';
+    aba = est.papel === 'pai' ? 'fila' : 'hoje';
+    render();
+  } catch {
+    $('#entrarErro').textContent = 'Não consegui falar com a planilha. Confira o endereço e a internet.';
+    conf = API_URL ? { url: API_URL } : {};
+  }
+});
+
+// =====================================================================
+// TELAS
+// =====================================================================
+
+const NAV = {
+  filha: [['hoje', '✅', 'Hoje'], ['loja', '🎁', 'Loja'], ['meta', '🎯', 'Meta'],
+          ['extrato', '🧾', 'Extrato']],
+  pai:   [['fila', '📥', 'Fila'], ['semana', '💰', 'Semana'], ['extrato', '🧾', 'Extrato'],
+          ['ajustes', '⚙️', 'Ajustes']],
+};
+
+function render() {
+  if (!est) return;
+  const papel = est.papel;
+
+  $('#logo').textContent = papel === 'pai' ? '📥' : '✅';
+  $('#titulo').textContent = papel === 'pai' ? 'Tarefas' : 'Oi, ' + est.nome;
+  $('#subtitulo').textContent = papel === 'pai'
+    ? est.cfg.nomeFilha + ' · ' + est.saldo.gastavel + ' para gastar'
+    : rotuloDia(est.hoje, est.hoje) + ' · ' + contarHoje();
+
+  const itens = NAV[papel];
+  if (!itens.some(i => i[0] === aba)) aba = itens[0][0];
+
+  $('#nav').innerHTML = itens.map(([id, ico, nome]) =>
+    `<button data-aba="${id}" class="${id === aba ? 'on' : ''}">
+       <i>${ico}</i>${esc(nome)}</button>`).join('');
+  $('#nav').querySelectorAll('button').forEach(b => {
+    b.onclick = () => { aba = b.dataset.aba; guardar(ABA, aba); render(); };
+  });
+
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('on'));
+  const alvo = $('#v-' + aba);
+  if (alvo) {
+    alvo.classList.add('on');
+    ({ hoje: telaHoje, loja: telaLoja, meta: telaMeta, extrato: telaExtrato,
+       fila: telaFila, semana: telaSemana, ajustes: telaAjustes }[aba] || (() => {}))(alvo);
+  }
+  mostrarStatus();
+}
+
+function contarHoje() {
+  const h = est.ocorrencias.filter(o => o.data === est.hoje);
+  const feitas = h.filter(o => o.status === 'aprovada' || o.status === 'marcada').length;
+  return feitas + ' de ' + h.length + ' tarefas';
+}
+
+function vazio(em, titulo, desc) {
+  return `<div class="vazio"><span class="em">${em}</span><b>${esc(titulo)}</b>
+    ${desc ? `<div class="sm">${esc(desc)}</div>` : ''}</div>`;
+}
+
+// ------------------------------------------------------------ saldos dela
+function blocoSaldos() {
+  const { gastavel, cofrinho } = est.saldo;
+  const min = est.porMinuto > 0 ? Math.floor(gastavel / est.porMinuto) : null;
+  const meta = est.recompensas.find(r => r.tipo === 'meta');
+  const fr = meta ? Math.min(1, cofrinho / meta.custo) : 0;
+
+  return `<div class="saldos">
+    <div class="saldo g">
+      <div class="rot">PARA GASTAR</div>
+      <div class="val">${gastavel}</div>
+      ${min !== null ? `<div class="eq">≈ ${min} min de tela</div>` : ''}
+    </div>
+    <div class="saldo c">
+      <div class="rot">COFRINHO</div>
+      <div class="val">${cofrinho}</div>
+      ${meta ? `<div class="eq">${Math.round(fr * 100)}% da meta</div>
+        <div class="barra c" style="margin-top:5px;height:6px"><div style="width:${fr * 100}%"></div></div>` : ''}
+    </div>
+  </div>
+  ${est.streak > 0 ? `<div style="margin-top:12px">
+    <span class="chip warn">🔥 ${est.streak} ${est.streak === 1 ? 'dia seguido' : 'dias seguidos'}</span>
+  </div>` : ''}`;
+}
+
+// ---------------------------------------------------------------- Hoje
+function cardTarefa(o, atrasada) {
+  const feita = o.status === 'aprovada';
+  const esperando = o.status === 'marcada';
+  const recusada = o.status === 'recusada';
+  const marcavel = o.status === 'pendente' || recusada;
+  const cls = feita ? 'feita' : esperando ? 'esperando' : recusada ? 'recusada' : '';
+
+  const tags = [];
+  if (o.pontos > 0) tags.push(`<span class="chip acc">+${o.pontos}</span>`);
+  else tags.push('<span class="chip">dever</span>');
+  if (esperando) tags.push('<span class="chip warn">esperando confirmação</span>');
+  if (recusada) tags.push('<span class="chip bad">recusada · pode marcar de novo</span>');
+  if (o._pendente) tags.push('<span class="chip warn">⏱ vai sincronizar</span>');
+  if (atrasada && marcavel) tags.push('<span class="chip warn">atrasada</span>');
+
+  return `<button class="tarefa ${cls}" data-oc="${esc(o.id)}" ${marcavel ? '' : 'disabled'}>
+    <span class="box">${feita ? '✓' : esperando ? '⏳' : ''}</span>
+    <span class="ico">${esc(o.icone || '⭐')}</span>
+    <span class="grow">
+      <div class="tit">${esc(o.titulo)}</div>
+      <div class="tags">${tags.join('')}</div>
+    </span>
+  </button>`;
+}
+
+function telaHoje(el) {
+  const doDia = est.ocorrencias.filter(o => o.data === est.hoje);
+  const limite = somarDias(est.hoje, -(est.cfg.janelaAtraso || 2));
+  const atrasadas = est.ocorrencias.filter(o =>
+    o.data < est.hoje && o.data >= limite && (o.status === 'pendente' || o.status === 'recusada'));
+  const dias = [...new Set(atrasadas.map(o => o.data))].sort().reverse();
+
+  let html = blocoSaldos();
+
+  if (fila.length) {
+    html += `<div class="aviso warn" style="margin-top:14px">
+      ${fila.length} ${fila.length === 1 ? 'marcação' : 'marcações'} esperando internet.
+      Já está salvo aqui, vai sincronizar sozinho.</div>`;
+  }
+
+  if (!doDia.length) {
+    html += vazio('🌤️', 'Dia livre!', 'Nenhuma tarefa marcada para hoje.');
+  } else {
+    for (const [id, nome] of PERIODOS) {
+      const itens = doDia.filter(o => (o.periodo || 'qualquer') === id);
+      if (!itens.length) continue;
+      html += `<h2>${esc(nome)}</h2>` + itens.map(o => cardTarefa(o)).join('');
+    }
+  }
+
+  if (dias.length) {
+    html += `<h2>Esqueceu de marcar?</h2>
+      <p class="muted sm" style="margin:-4px 0 10px">Você ainda pode marcar o que fez
+      nos últimos ${est.cfg.janelaAtraso} dias.</p>`;
+    for (const d of dias) {
+      html += `<div style="margin:12px 0 6px"><span class="chip">${esc(rotuloDia(d, est.hoje))}</span></div>`;
+      html += atrasadas.filter(o => o.data === d).map(o => cardTarefa(o, true)).join('');
+    }
+  }
+
+  el.innerHTML = html;
+  el.querySelectorAll('[data-oc]').forEach(b => {
+    b.onclick = () => {
+      const oc = est.ocorrencias.find(o => o.id === b.dataset.oc);
+      if (!oc) return;
+      marcarLocal(oc);
+      enfileirar({ acao: 'marcar', id: oc.id });
+      render();
+    };
+  });
+}
+
+// ---------------------------------------------------------------- Loja
+function telaLoja(el) {
+  const pendentes = est.resgates.filter(r => r.status === 'pedido' || r.status === 'aprovado');
+  const catalogo = est.recompensas.filter(r => r.tipo !== 'meta');
+  const min = est.porMinuto > 0 ? Math.floor(est.saldo.gastavel / est.porMinuto) : null;
+
+  let html = `<div class="card">
+    <div class="between">
+      <div><div class="muted xs">PARA GASTAR</div>
+        <div style="font-size:1.6rem;font-weight:800">${est.saldo.gastavel}</div></div>
+      ${min !== null ? `<div class="muted sm">≈ ${min} min de tela</div>` : ''}
+    </div></div>`;
+
+  if (pendentes.length) {
+    html += '<h2>Seus pedidos</h2>';
+    html += pendentes.map(r => `<div class="card">
+      <div class="between">
+        <b class="grow">${esc(r.titulo)}</b>
+        <span class="chip acc">−${r.custo}</span>
+      </div>
+      ${r.status === 'pedido' ? `
+        <div style="margin-top:8px"><span class="chip warn">⏳ esperando confirmação</span></div>
+        <p class="muted sm">Os pontos já saíram do seu saldo. Se ele recusar, eles voltam.</p>
+        ${r._pendente ? '' : `<button class="bt ghost" data-cancelar="${esc(r.id)}">
+          Desistir e pegar os pontos de volta</button>`}`
+      : `<div style="margin-top:8px"><span class="chip ok">✅ aprovado — é só combinar com ele</span></div>`}
+    </div>`).join('');
+  }
+
+  html += '<h2>O que você pode pedir</h2>';
+  html += catalogo.map(r => {
+    const saldo = r.bolso === 'cofrinho' ? est.saldo.cofrinho : est.saldo.gastavel;
+    const faltam = r.custo - saldo;
+    const pode = faltam <= 0;
+    return `<div class="card">
+      <div class="row">
+        <span style="font-size:26px">${esc(r.icone || '🎁')}</span>
+        <span class="grow"><b>${esc(r.titulo)}</b>
+          <div class="muted xs">${r.custo} pontos${r.bolso === 'cofrinho' ? ' · do cofrinho' : ''}</div>
+        </span>
+        ${pode ? `<button class="bt" style="width:auto;padding:9px 16px"
+          data-pedir="${esc(r.id)}">Pedir</button>` : ''}
+      </div>
+      ${pode ? '' : `<div style="margin-top:10px">
+        <div class="barra"><div style="width:${Math.max(0, (saldo / r.custo) * 100)}%"></div></div>
+        <div class="muted xs" style="margin-top:5px">faltam ${faltam} pontos</div>
+      </div>`}
+    </div>`;
+  }).join('');
+
+  el.innerHTML = html;
+
+  el.querySelectorAll('[data-pedir]').forEach(b => {
+    b.onclick = () => {
+      const r = est.recompensas.find(x => x.id === b.dataset.pedir);
+      if (!r) return;
+      if (!confirm(r.titulo + '\n\nCusta ' + r.custo + ' pontos. Seu pai precisa confirmar.')) return;
+      pedirLocal(r);
+      enfileirar({ acao: 'pedir', id: r.id });
+      render();
+    };
+  });
+  el.querySelectorAll('[data-cancelar]').forEach(b => {
+    b.onclick = () => {
+      enfileirar({ acao: 'cancelar', id: b.dataset.cancelar });
+      toast('Pedido cancelado');
+    };
+  });
+}
+
+// ---------------------------------------------------------------- Meta
+function telaMeta(el) {
+  const meta = est.recompensas.find(r => r.tipo === 'meta');
+  if (!meta) {
+    el.innerHTML = vazio('🎯', 'Nenhuma meta ainda', 'Combine com seu pai qual vai ser o prêmio grande.');
+    return;
+  }
+  const falta = Math.max(0, meta.custo - est.saldo.cofrinho);
+  const fr = Math.min(1, est.saldo.cofrinho / meta.custo);
+  const conquistada = falta === 0;
+
+  // Ritmo real das últimas entradas, não um número inventado.
+  const entradas = est.extrato.filter(e => e.tipo === 'ganho' && e.cofrinho > 0);
+  let previsao = '';
+  if (!conquistada && entradas.length >= 3) {
+    const datas = entradas.map(e => e.quando.slice(0, 10)).filter(Boolean).sort();
+    const dias = Math.max(1, diffDias(datas[0], est.hoje) + 1);
+    const porDia = entradas.reduce((s, e) => s + e.cofrinho, 0) / dias;
+    if (porDia > 0) {
+      const restam = Math.ceil(falta / porDia);
+      previsao = `<div class="card"><h2 style="margin-top:0">No seu ritmo</h2>
+        <div>Você junta cerca de <b>${porDia.toFixed(0)} pontos por dia</b> no cofrinho.</div>
+        <div class="muted sm">Nesse ritmo faltam mais ou menos
+          ${restam > 60 ? Math.round(restam / 30) + ' meses' : restam + ' dias'}.</div></div>`;
+    }
+  }
+
+  el.innerHTML = `
+    <div class="card" style="text-align:center;background:var(--cofre-soft);border:0">
+      <div style="font-size:58px">${esc(meta.icone || '🎯')}</div>
+      <div style="font-weight:800;font-size:1.2rem;color:var(--cofre);margin:6px 0 14px">
+        ${esc(meta.titulo)}</div>
+      <div class="barra c alta"><div style="width:${fr * 100}%"></div></div>
+      <div class="between" style="margin-top:8px;color:var(--cofre)">
+        <b style="font-size:1.1rem">${est.saldo.cofrinho}</b>
+        <span class="sm" style="opacity:.8">de ${meta.custo}</span>
+      </div>
+      <div style="margin-top:12px">${conquistada
+        ? '<span class="chip ok">🎉 conquistada! peça na loja</span>'
+        : `<b style="color:var(--cofre)">faltam ${falta} pontos</b>`}</div>
+    </div>
+    ${previsao}
+    <div class="card"><h2 style="margin-top:0">Como funciona</h2>
+      <p class="muted sm" style="margin:0">De cada tarefa,
+      ${Math.round((est.cfg.taxaCofrinho || .3) * 100)}% dos pontos vão direto para o cofrinho e
+      não podem ser gastos em tela. É assim que a meta grande acontece sem você
+      precisar se segurar.</p></div>`;
+}
+
+// ------------------------------------------------------------- Extrato
+const ROTULO_TIPO = { ganho: 'tarefa', gasto: 'resgate', devolucao: 'devolução', ajuste: 'ajuste' };
+
+function telaExtrato(el) {
+  let html = `<div class="saldos">
+    <div class="saldo g"><div class="rot">GASTÁVEL</div><div class="val">${est.saldo.gastavel}</div></div>
+    <div class="saldo c"><div class="rot">COFRINHO</div><div class="val">${est.saldo.cofrinho}</div></div>
+  </div>`;
+
+  if (!est.extrato.length) {
+    html += vazio('🧾', 'Nada ainda', 'Faça uma tarefa e ela aparece aqui.');
+  } else {
+    html += '<h2>Lançamentos</h2>';
+    html += est.extrato.map(e => `<div class="card">
+      <div class="between">
+        <span class="grow"><b>${esc(e.motivo)}</b>
+          <div class="muted xs" style="margin-top:3px">
+            <span class="chip">${esc(ROTULO_TIPO[e.tipo] || e.tipo)}</span>
+            ${esc(e.quando)}</div>
+        </span>
+        <span style="text-align:right">
+          ${e.gastavel ? `<div style="font-weight:800;color:${e.gastavel > 0 ? 'var(--ok)' : 'var(--bad)'}">
+            ${e.gastavel > 0 ? '+' : ''}${e.gastavel}</div>` : ''}
+          ${e.cofrinho ? `<div class="xs" style="font-weight:700;color:var(--cofre)">
+            ${e.cofrinho > 0 ? '+' : ''}${e.cofrinho} cofrinho</div>` : ''}
+        </span>
+      </div></div>`).join('');
+  }
+  el.innerHTML = html;
+}
+
+// ---------------------------------------------------------------- Fila
+/**
+ * O que ela fez para juntar os pontos de um resgate.
+ *
+ * Existe porque a liberação da tela é manual e analisada: aprovar "30 min" sem
+ * ver as tarefas por trás é aprovar no escuro. Pega as tarefas aprovadas entre
+ * o resgate anterior e este.
+ */
+function porTrasDoResgate(rg) {
+  const anteriores = est.resgates
+    .filter(r => (r.status === 'aprovado' || r.status === 'entregue') && r.quando < rg.quando)
+    .map(r => r.quando).sort();
+  const desde = anteriores.length ? anteriores[anteriores.length - 1] : '';
+  return est.ocorrencias.filter(o =>
+    o.status === 'aprovada' && o.decidida_em && o.decidida_em <= rg.quando &&
+    (!desde || o.decidida_em > desde));
+}
+
+function telaFila(el) {
+  const pedidos = est.resgates.filter(r => r.status === 'pedido' || r.status === 'aprovado');
+  const marcadas = est.ocorrencias.filter(o => o.status === 'marcada');
+
+  let html = `<div class="card"><div class="between">
+      <span><div class="muted xs">${esc(est.cfg.nomeFilha.toUpperCase())}</div>
+        <div><b style="font-size:1.3rem">${est.saldo.gastavel}</b>
+        <span class="muted sm"> para gastar · ${est.saldo.cofrinho} no cofrinho</span></div></span>
+      ${est.streak > 0 ? `<span class="chip warn">🔥 ${est.streak}</span>` : ''}
+    </div></div>`;
+
+  if (!pedidos.length && !marcadas.length) {
+    html += vazio('☕', 'Nada esperando',
+      'Quando ela marcar algo ou pedir uma recompensa, aparece aqui.');
+  }
+
+  if (pedidos.length) {
+    html += `<h2>Recompensas pedidas</h2>
+      <p class="muted sm" style="margin:-4px 0 10px">Veja o que ela fez antes de liberar.</p>`;
+    html += pedidos.map(rg => {
+      const feitas = porTrasDoResgate(rg);
+      const pontos = feitas.reduce((s, o) => s + o.pontos, 0);
+      const aprovado = rg.status === 'aprovado';
+      return `<div class="card">
+        <div class="between">
+          <span class="grow"><b style="font-size:1.05rem">${esc(rg.titulo)}</b>
+            <div class="tags" style="margin-top:5px">
+              <span class="chip acc">−${rg.custo}${rg.bolso === 'cofrinho' ? ' do cofrinho' : ''}</span>
+              ${rg.minutos ? `<span class="chip">${rg.minutos} min de tela</span>` : ''}
+              ${aprovado ? '<span class="chip ok">aprovado</span>' : ''}
+            </div></span>
+        </div>
+
+        ${feitas.length ? `<div style="background:var(--card2);border-radius:14px;padding:12px;margin-top:12px">
+          <div class="between" style="margin-bottom:8px">
+            <span class="muted xs" style="font-weight:800;letter-spacing:.06em">
+              O QUE ELA FEZ (${feitas.length})</span>
+            <b style="color:var(--accent2)">${pontos} pts</b>
+          </div>
+          ${feitas.slice(-8).reverse().map(o => `<div class="between" style="padding:3px 0">
+            <span class="row grow" style="gap:7px;min-width:0">
+              <span>${esc(o.icone || '⭐')}</span>
+              <span class="sm trunc">${esc(o.titulo)}</span></span>
+            <span class="muted xs">${esc(rotuloDia(o.data, est.hoje))}</span>
+          </div>`).join('')}
+          ${feitas.length > 8 ? `<div class="muted xs" style="margin-top:6px">
+            e mais ${feitas.length - 8}</div>` : ''}
+        </div>`
+        : '<div class="aviso warn" style="margin-top:12px">Nenhuma tarefa nova desde o último resgate.</div>'}
+
+        ${aprovado ? `
+          <p class="muted sm">Libere no controle parental e marque aqui quando tiver feito.</p>
+          <button class="bt ok" data-entregue="${esc(rg.id)}">Já liberei</button>`
+        : `<div class="bts" style="margin-top:12px">
+            <button class="bt ok" data-rg-sim="${esc(rg.id)}">Aprovar</button>
+            <button class="bt ghost" data-rg-nao="${esc(rg.id)}">Recusar</button>
+          </div>`}
+      </div>`;
+    }).join('');
+  }
+
+  if (marcadas.length) {
+    html += '<h2>Tarefas aguardando</h2>';
+    html += marcadas.map(o => `<div class="card">
+      <div class="row">
+        <span style="font-size:24px">${esc(o.icone || '⭐')}</span>
+        <span class="grow"><b>${esc(o.titulo)}</b>
+          <div class="tags" style="margin-top:4px">
+            <span class="chip">${esc(rotuloDia(o.data, est.hoje))}</span>
+            ${o.pontos > 0 ? `<span class="chip acc">+${o.pontos}</span>`
+                           : '<span class="chip">dever</span>'}
+            ${o.data !== est.hoje ? '<span class="chip warn">marcada em atraso</span>' : ''}
+          </div></span>
+      </div>
+      <div class="bts" style="margin-top:12px">
+        <button class="bt ok" data-oc-sim="${esc(o.id)}">Aprovar</button>
+        <button class="bt ghost" data-oc-nao="${esc(o.id)}">Recusar</button>
+      </div></div>`).join('');
+  }
+
+  el.innerHTML = html;
+
+  const decidir = (sel, acao, aprovar, pergunta) => {
+    el.querySelectorAll(`[${sel}]`).forEach(b => {
+      b.onclick = () => {
+        if (pergunta && !confirm(pergunta)) return;
+        const id = b.getAttribute(sel);
+        if (acao === 'decidir') {
+          const o = est.ocorrencias.find(x => x.id === id);
+          if (o) o.status = aprovar ? 'aprovada' : 'recusada';
+        } else {
+          const r = est.resgates.find(x => x.id === id);
+          if (r) r.status = aprovar ? 'aprovado' : 'recusado';
+        }
+        guardar(CACHE, est);
+        enfileirar({ acao, id, aprovar });
+        render();
+      };
+    });
+  };
+  decidir('data-oc-sim', 'decidir', true);
+  decidir('data-oc-nao', 'decidir', false, 'Recusar? Ela poderá marcar de novo dentro do prazo.');
+  decidir('data-rg-sim', 'decidirResgate', true);
+  decidir('data-rg-nao', 'decidirResgate', false, 'Recusar o pedido? Os pontos voltam para ela.');
+
+  el.querySelectorAll('[data-entregue]').forEach(b => {
+    b.onclick = () => {
+      const r = est.resgates.find(x => x.id === b.dataset.entregue);
+      if (r) r.status = 'entregue';
+      guardar(CACHE, est);
+      enfileirar({ acao: 'entregue', id: b.dataset.entregue });
+      render();
+    };
+  });
+}
+
+// -------------------------------------------------------------- Semana
+function telaSemana(el) {
+  const r = est.resumoSemana;
+  const fechada = est.semanas.find(s => s.semana === est.semana);
+
+  let html = `<div class="card">
+    <div class="between">
+      <div style="font-size:2rem;font-weight:800">${r.pct}%</div>
+      <div style="text-align:right">
+        <div style="font-size:1.3rem;font-weight:800;color:var(--ok)">
+          ${dinheiro(est.faixa ? est.faixa.valor : 0)}</div>
+        <div class="muted xs">${esc(est.faixa ? est.faixa.rotulo : 'sem faixa')}</div>
+      </div>
+    </div>
+    <div class="barra v alta" style="margin:12px 0 8px"><div style="width:${r.pct}%"></div></div>
+    <div class="muted sm">${r.aprovadas} de ${r.elegiveis} tarefas que contam${
+      r.emAberto ? ' · ' + r.emAberto + ' ainda em aberto' : ''}</div>`;
+
+  // Mostra o alcançável, não o perdido: é o que mantém a semana viva.
+  if (est.proxima && est.faltamParaProxima > 0) {
+    html += `<div class="aviso warn" style="margin-top:12px">Faltam ${est.faltamParaProxima}
+      ${est.faltamParaProxima === 1 ? 'tarefa' : 'tarefas'} para
+      ${dinheiro(est.proxima.valor)}.</div>`;
+  } else if (est.proxima && est.faltamParaProxima === null) {
+    html += `<p class="muted sm">${dinheiro(est.proxima.valor)} não é mais alcançável
+      nesta semana.</p>`;
+  }
+
+  if (fechada) {
+    html += `<div style="margin-top:12px"><span class="chip ok">fechada em ${fechada.pct}% ·
+      ${dinheiro(fechada.valor)}</span>
+      ${fechada.status === 'paga' ? ' <span class="chip">paga</span>' : ''}</div>`;
+  }
+
+  html += `<button class="bt" style="margin-top:12px" id="btFechar">
+    ${fechada ? 'Recalcular a semana' : 'Fechar a semana'}</button></div>`;
+
+  if (est.semanas.length) {
+    html += '<h2>Semanas fechadas</h2>';
+    html += est.semanas.map(s => `<div class="card">
+      <div class="between">
+        <span><b>semana de ${esc(s.semana.slice(8, 10) + '/' + s.semana.slice(5, 7))}</b>
+          <div class="muted sm">${s.aprovadas} de ${s.elegiveis} · ${s.pct}%</div></span>
+        <span style="text-align:right">
+          <div style="font-weight:800">${dinheiro(s.valor)}</div>
+          <span class="chip ${s.status === 'paga' ? 'ok' : 'warn'}">
+            ${s.status === 'paga' ? 'paga' : 'a pagar'}</span>
+        </span>
+      </div>
+      ${s.status !== 'paga' ? `<button class="bt ghost" style="margin-top:10px"
+        data-pagar="${esc(s.semana)}">Marcar como paga</button>` : ''}
+    </div>`).join('');
+  }
+
+  html += `<h2>As faixas</h2><div class="card">
+    ${est.faixas.map(f => `<div class="between" style="padding:3px 0">
+      <span class="muted">a partir de ${f.min_pct}%</span>
+      <b>${dinheiro(f.valor)}</b></div>`).join('')}
+    <p class="muted xs" style="margin:10px 0 0">O piso nunca é zero de propósito: se ela
+    puder zerar, para de tentar no meio da semana. Edite as faixas na aba
+    <b>Faixas</b> da planilha.</p></div>`;
+
+  el.innerHTML = html;
+
+  $('#btFechar').onclick = () => {
+    enfileirar({ acao: 'fecharSemana', semana: est.semana });
+    toast('Fechando a semana…');
+  };
+  el.querySelectorAll('[data-pagar]').forEach(b => {
+    b.onclick = () => {
+      if (!confirm('Marcar como paga? Depois disso a semana não pode mais ser recalculada.')) return;
+      enfileirar({ acao: 'pagarSemana', semana: b.dataset.pagar });
+      toast('Marcando como paga…');
+    };
+  });
+}
+
+// ------------------------------------------------------------- Ajustes
+function telaAjustes(el) {
+  el.innerHTML = `
+    <div class="card">
+      <h2 style="margin-top:0">A planilha é o painel</h2>
+      <p class="muted sm">Tarefas, pontos, preços das recompensas e as faixas da mesada
+      se editam direto na planilha. Nada aqui precisa ser recompilado.</p>
+      ${est.planilha ? `<a href="${esc(est.planilha)}" target="_blank" rel="noopener"
+        class="bt" style="display:block;text-align:center;text-decoration:none">
+        Abrir a planilha</a>` : ''}
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0">Ajustar pontos</h2>
+      <p class="muted sm">Entra como lançamento novo no extrato, sem apagar nada.
+      Use valores negativos para descontar.</p>
+      <div class="campo"><label>Saldo gastável</label>
+        <input id="ajG" inputmode="numeric" placeholder="20 ou -20"></div>
+      <div class="campo"><label>Cofrinho</label>
+        <input id="ajC" inputmode="numeric" placeholder="0"></div>
+      <div class="campo"><label>Motivo</label>
+        <input id="ajM" placeholder="Ajudou a lavar o carro"></div>
+      <div class="campo"><button class="bt" id="btAjustar">Lançar</button></div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0">Calibração</h2>
+      <p class="muted sm">Seu teto é <b>${est.cfg.tetoTela} min de tela por dia</b>.
+      Precifique sempre de trás pra frente: decida o máximo aceitável num dia perfeito
+      e derive os preços disso, nunca o contrário.</p>
+      ${est.porMinuto > 0 ? `<p class="muted sm">A tela mais barata do catálogo custa
+        <b>${est.porMinuto.toFixed(1)} pontos por minuto</b>.</p>` : ''}
+    </div>
+
+    <div class="card">
+      <button class="bt ghost" id="btAtualizar">Atualizar da planilha</button>
+      <button class="bt bad" style="margin-top:8px" id="btSair">Sair deste aparelho</button>
+    </div>`;
+
+  $('#btAjustar').onclick = () => {
+    const g = Number($('#ajG').value) || 0;
+    const c = Number($('#ajC').value) || 0;
+    const m = $('#ajM').value.trim();
+    if (!g && !c) return toast('Informe algum valor.');
+    if (!m) return toast('O extrato precisa de um motivo.');
+    enfileirar({ acao: 'ajustar', gastavel: g, cofrinho: c, motivo: m });
+    $('#ajG').value = ''; $('#ajC').value = ''; $('#ajM').value = '';
+    toast('Lançando…');
+  };
+  $('#btAtualizar').onclick = () => sincronizar();
+  $('#btSair').onclick = () => {
+    if (confirm('Sair? Você vai precisar do código de acesso para entrar de novo.')) sair();
+  };
+}
+
+// =====================================================================
+// INÍCIO
+// =====================================================================
+if (!API_URL) $('#campoUrl').hidden = false;
+
+aba = recuperar(ABA, 'hoje');
+
+if (conf.codigo && est) {
+  document.body.classList.remove('sem-codigo');
+  render();
+  sincronizar();
+} else if (conf.codigo) {
+  document.body.classList.remove('sem-codigo');
+  status('Carregando…');
+  sincronizar();
+}
+
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>

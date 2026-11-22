@@ -1,115 +1,94 @@
-# Tarefas & Recompensas
+# Tarefas e Recompensas
 
-App de celular para delegar tarefas a uma criança e acompanhar no celular do
-responsável. Ela marca o que fez, você confere, e as tarefas cumpridas viram
-pontos (tela e privilégios), cofrinho (meta grande) e mesada.
+Uma página só, hospedada no GitHub Pages, conversando com uma **planilha do
+Google** através do **Apps Script**. Ela marca o que fez no celular dela, você
+confere no seu, e as tarefas viram pontos, cofrinho e mesada.
 
-- **Decisões de desenho e regras:** [`docs/modelo-de-dados.md`](docs/modelo-de-dados.md)
-- **Esquema:** `supabase/migrations/`
-- **Testes das regras:** `tests/regras.sql` (13 casos, Postgres local, sem rede)
+Sem app para instalar, sem loja, sem servidor. A planilha é o banco de dados
+**e** o seu painel de administração.
 
-## Estado atual
+- **Como testar:** `./scripts/testar.sh` (44 testes, sem Google e sem rede)
+- **As decisões de desenho:** [`docs/regras.md`](docs/regras.md)
 
-| Parte | Situação |
-|---|---|
-| Esquema, funções, RLS | pronto e testado (15 casos) |
-| Bucket das fotos | pronto |
-| Seed calibrado | pronto |
-| App dela (Hoje, Loja, Meta, Extrato) | pronto |
-| App seu (Fila, Tarefas, Preços, Mesada) | pronto |
-| Lógica de streak e mesada | pronto e testado (20 casos) |
-| Push notification | pendente |
-| Build do APK (EAS) | pendente |
+## As três moedas
 
-## Rodar os testes
-
-Nenhum dos dois precisa de Supabase nem de internet.
-
-Regras do banco (sobe um Postgres local, aplica a migração e exercita as
-regras, incluindo os casos de RLS):
-
-```bash
-./scripts/testar-db.sh
-```
-
-Lógica do app (streak, percentual da semana, faixas de mesada, datas):
-
-```bash
-cd mobile && ./scripts/testar-logica.sh
-```
-
-## Subir no Supabase
-
-1. Crie o projeto em [supabase.com](https://supabase.com) (o plano gratuito é
-   suficiente para duas pessoas).
-
-2. No SQL Editor, rode nesta ordem:
-
-```
-supabase/migrations/0001_init.sql
-supabase/migrations/0002_storage.sql
-```
-
-3. Em **Authentication → Users → Add user**, crie dois usuários com e-mail e
-   senha: o seu e o dela. O e-mail pode ser inventado (`pai@casa.local`), já que
-   ninguém recebe mensagem nele — mas **marque "Auto Confirm User"**, senão o
-   login não funciona. Copie os dois UUIDs.
-
-4. Abra `supabase/seed.sql`, cole os dois UUIDs nas duas linhas marcadas no topo,
-   e rode o arquivo inteiro no SQL Editor. Ele é um bloco único, então roda igual
-   no painel e no `psql`. Se você esquecer de colar, ele falha dizendo isso.
-
-   Rode **uma vez**: a família e as faixas são idempotentes, mas tarefas e
-   recompensas duplicariam.
-
-5. Em **Project Settings → API**, copie a URL do projeto e a chave `anon`.
-
-6. No app, crie o `.env`:
-
-```bash
-cd mobile && cp .env.example .env
-```
-
-Preencha com os dois valores do passo anterior. Enquanto isso não existir, o
-app abre numa tela explicando o que falta em vez de quebrar.
-
-## Rodar o app
-
-```bash
-cd mobile && npx expo start
-```
-
-Abra pelo Expo Go nos dois celulares. Cada um entra com o seu e-mail; depois
-disso o app abre sozinho — ela nunca digita senha, porque a sessão fica guardada
-no aparelho.
-
-Para instalar de verdade (APK, sem loja), o próximo passo é o EAS Build.
-
-## Calibração do catálogo
-
-Os preços no seed vêm do teto que você definiu — no máximo ~40 min de tela por
-dia. Precifique sempre **de trás pra frente**: decida o máximo aceitável num dia
-perfeito e derive os preços disso, nunca o contrário.
-
-Com o seed atual:
-
-| Dia | Pontos | Gastáveis | Equivale a |
+| | O que é | De onde vem | Para que serve |
 |---|---|---|---|
-| Dia útil | 90–105 | 63–74 | 32–37 min de tela |
-| Fim de semana | 130 | 91 | 46 min de tela |
+| **Saldo gastável** | 70% de cada ganho | tarefas extras aprovadas | tela e privilégios |
+| **Cofrinho** | 30% de cada ganho, automático | tarefas extras aprovadas | só a meta grande |
+| **Mesada** | trilha separada, em reais | percentual da semana | dinheiro |
 
-O cofrinho acumula ~28 pontos/dia, cerca de 850/mês. A meta grande de 4.000
-pontos leva aproximadamente 4 meses e meio.
+A divisão 70/30 é automática. Ela não precisa ter disciplina de poupar — a
+estrutura poupa por ela.
 
-Conte que a primeira semana vai estar mal calibrada — preços são editáveis no app
-sem recompilar nada.
+## Montar (uma vez)
+
+**1. A planilha.** Crie uma planilha nova no Google Sheets. Em
+**Extensões → Apps Script**, apague o conteúdo e cole
+[`apps-script/Codigo.gs`](apps-script/Codigo.gs) inteiro. Salve.
+
+**2. Instalar.** No editor de script, escolha a função `instalar` e clique em
+**Executar**. Autorize quando pedir. Ele cria as abas, as tarefas, as
+recompensas, as faixas da mesada e mostra **os dois códigos de acesso** —
+anote.
+
+**3. Publicar.** **Implantar → Nova implantação → App da Web**:
+
+- Executar como: **eu**
+- Quem pode acessar: **qualquer pessoa**
+
+Copie a URL que termina em `/exec`.
+
+> "Qualquer pessoa" assusta, mas é necessário: o celular dela não faz login no
+> Google. Quem tem a URL e não tem código não consegue nada — toda ação exige
+> um código válido, e são 8 caracteres de 32 possíveis.
+
+**4. O site.** Em **Settings → Pages** do repositório, ligue o Pages na branch
+`main`. O endereço fica `https://SEU-USUARIO.github.io/tarefas-recompensas/`.
+
+**5. Nos celulares.** Abra o endereço no Chrome, cole a URL do passo 3 e o
+código da pessoa. Depois use **⋮ → Adicionar à tela inicial** — vira ícone e
+abre em tela cheia, igual a um app.
+
+Para não colar a URL em cada aparelho, você pode preenchê-la na constante
+`API_URL` no topo do `<script>` do `index.html` e fazer commit. Aí cada celular
+só precisa do código.
+
+## Viver com isso
+
+Tudo que você vai querer mudar está **na planilha**, não no código:
+
+| Aba | Para quê |
+|---|---|
+| `Tarefas` | criar, mudar pontos, horário, recorrência, desativar |
+| `Recompensas` | preços, o que entra na loja, a meta grande |
+| `Faixas` | os valores da mesada por percentual |
+| `Config` | fuso, taxa do cofrinho, janela de atraso, teto de tela, códigos |
+| `Ocorrencias`, `Extrato`, `Resgates`, `Semanas` | histórico — não precisa mexer |
+
+A planilha também ganha um menu **Tarefas** com atalhos para instalar, gerar os
+dias e ver os códigos.
+
+**Conte que a primeira semana vai estar mal calibrada.** Sempre está. O jeito
+certo é precificar **de trás pra frente**: decida o máximo de tela que você
+aceita num dia perfeito e derive os preços disso. A aba Ajustes do seu app
+mostra quanto o catálogo está liberando.
+
+Com o conteúdo inicial: dia útil completo dá 90 a 105 pontos, ou seja 63 a 74
+gastáveis — 32 a 37 minutos de tela, dentro de um teto de 40. O cofrinho junta
+uns 28 por dia, e a meta de 4.000 leva uns 4 meses e meio.
+
+## O que o app não faz
+
+Não libera tempo de tela automaticamente — o Family Link não tem API pública.
+O app é o **placar e o contrato**: ele diz que ela tem 45 minutos acumulados, e
+você libera na mão. O botão "Já liberei" é só o seu registro de que fez.
 
 ## Antes de instalar
 
-Vale conversar com ela antes, e deixá-la escolher duas ou três coisas: quais
-privilégios entram no catálogo, qual é a meta grande, qual a foto. Criança que
+Converse com ela antes, e deixe-a escolher duas ou três coisas: quais
+privilégios entram no catálogo, qual é a meta grande, qual o emoji. Criança que
 ajudou a escrever a regra cumpre a regra; criança que recebeu o app pronto testa
 onde ele quebra.
 
-E deixe explícito que os R$ 50 continuam sendo o esperado, não um prêmio novo —
-caso contrário a mudança é sentida como punição, não como oportunidade.
+E deixe explícito que os R$ 50 continuam sendo o esperado, não um prêmio novo.
