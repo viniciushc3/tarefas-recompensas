@@ -1065,3 +1065,19 @@ test('coluna que falta entra sozinha, sem rodar instalar()', () => {
   const oc = e.ocorrencias.find(o => o.titulo === 'Lavar a louça' && o.data === e.hoje);
   assert.equal(oc.precisa_foto, true, 'a tarefa continuou sem pedir foto');
 });
+
+test('a qualidade da foto vem da planilha, baixa por padrão', () => {
+  const { api, cfg } = montar();
+  let e = estado(api, cfg.codigoFilha);
+  assert.equal(e.cfg.qualidadeFoto, 'baixa');
+  assert.deepEqual(e.cfg.foto, { lado: 640, q: 0.45 });
+
+  const linha = api.ler('Config').find(c => c.chave === 'qualidade_foto');
+  api.escrever('Config', linha._linha, 'valor', 'alta');
+  e = estado(api, cfg.codigoFilha);
+  assert.deepEqual(e.cfg.foto, { lado: 1200, q: 0.70 });
+
+  // valor sem sentido cai no padrão em vez de quebrar a câmera
+  api.escrever('Config', linha._linha, 'valor', 'altíssima');
+  assert.deepEqual(estado(api, cfg.codigoFilha).cfg.foto, { lado: 640, q: 0.45 });
+});

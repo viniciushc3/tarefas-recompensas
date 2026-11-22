@@ -703,11 +703,17 @@ function pedirFoto() {
 /**
  * Encolhe a foto antes de mandar.
  *
- * Foto de celular tem 3 a 8 MB. Para conferir se a cama está arrumada, 1200px
- * a 65% basta — e o que trafega vai para menos de 200 KB, que é a diferença
- * entre esperar dois segundos e esperar meio minuto no 4G da rua.
+ * Foto de celular tem 3 a 8 MB. Para conferir se a cama está arrumada,
+ * 480x640 responde de sobra: 58 KB, contra 205 KB no tamanho anterior.
+ *
+ * O tamanho pesa duas vezes — no envio dela e de novo quando o pai abre a
+ * fila para olhar. O nível vem da planilha (qualidade_foto: baixa, media ou
+ * alta), com baixa como padrão.
  */
-async function comprimir(arquivo, maxLado = 1200, qualidade = 0.65) {
+async function comprimir(arquivo, maxLado, qualidade) {
+  const padrao = (est && est.cfg && est.cfg.foto) || { lado: 640, q: 0.45 };
+  maxLado = maxLado || padrao.lado;
+  qualidade = qualidade || padrao.q;
   const url = URL.createObjectURL(arquivo);
   try {
     const img = new Image();

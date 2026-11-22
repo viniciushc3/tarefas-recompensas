@@ -746,3 +746,61 @@ test('o modo diagnóstico registra cada conversa com a planilha', async (t) => {
   await p2.waitForSelector('nav button', { state: 'visible', timeout: 15000 });
   assert.ok(!(await p2.locator('#registro').isVisible()));
 });
+
+/** Gera uma imagem grande com cara de foto, para medir a compressão de verdade. */
+async function fotoGrande(navegador) {
+  const p = await navegador.newPage();
+  await p.setContent('<html><body></body></html>');
+  const b64 = await p.evaluate(() => {
+    const c = document.createElement('canvas');
+    c.width = 2400; c.height = 1800;
+    const x = c.getContext('2d');
+    const g = x.createLinearGradient(0, 0, 2400, 1800);
+    g.addColorStop(0, '#caa'); g.addColorStop(1, '#346');
+    x.fillStyle = g; x.fillRect(0, 0, 2400, 1800);
+    for (let i = 0; i < 2500; i++) {
+      x.fillStyle = `hsl(${Math.random() * 360},60%,${20 + Math.random() * 60}%)`;
+      x.fillRect(Math.random() * 2400, Math.random() * 1800, 20 + Math.random() * 140,
+        20 + Math.random() * 140);
+    }
+    return c.toDataURL('image/jpeg', 0.95).split(',')[1];
+  });
+  await p.close();
+  return Buffer.from(b64, 'base64');
+}
+
+test('a foto chega pequena na planilha', async (t) => {
+  const api = criarAmbiente();
+  api.instalar();
+  const cfg = api.config();
+  const servidor = await subirServidor(api);
+  const url = 'http://127.0.0.1:' + servidor.address().port;
+  const navegador = await chromium.launch();
+  t.after(async () => { await navegador.close(); servidor.close(); });
+
+  const original = await fotoGrande(navegador);
+  assert.ok(original.length > 300000,
+    'a foto de teste deveria ser grande: ' + Math.round(original.length / 1024) + ' KB');
+
+  const ctx = await navegador.newContext({ viewport: { width: 390, height: 844 } });
+  const p = await ctx.newPage();
+  p.on('filechooser', async e => {
+    await e.setFiles({ name: 'quarto.jpg', mimeType: 'image/jpeg', buffer: original });
+  });
+  const erros = await abrir(p, url, cfg.codigoFilha);
+
+  await p.locator('.tarefa:not([disabled])', { hasText: 'Organizar o quarto' }).first().click();
+  await p.waitForFunction(
+    () => document.querySelector('#v-hoje').textContent.includes('foto enviada'),
+    null, { timeout: 30000 });
+
+  const guardada = [...api._ambiente.DriveApp._arquivos.values()][0];
+  const bytes = guardada.getBytes().length;
+  console.log('      foto: ' + Math.round(original.length / 1024) + ' KB -> ' +
+    Math.round(bytes / 1024) + ' KB');
+
+  assert.ok(bytes < 110000, 'chegou com ' + Math.round(bytes / 1024) + ' KB, esperado menos de 110');
+  assert.ok(bytes < original.length / 3, 'mal comprimiu');
+  assert.ok(bytes > 3000, 'suspeito de vir vazia: ' + bytes + ' bytes');
+  assert.deepEqual(erros, []);
+});

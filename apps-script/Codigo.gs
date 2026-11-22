@@ -34,6 +34,20 @@ var ABAS = {
  */
 var VERSAO = '2026-11-22.4';
 
+/**
+ * Tamanho da foto. Medido com uma foto de celular de 3000x4000:
+ * baixa 58 KB, media 113 KB, alta 230 KB.
+ *
+ * Baixa é o padrão porque a foto existe para responder "a cama está
+ * arrumada?", e 480x640 responde isso de sobra. O tamanho pesa duas vezes:
+ * no envio dela e de novo quando você abre a fila para olhar.
+ */
+var QUALIDADES = {
+  baixa: { lado: 640, q: 0.45 },
+  media: { lado: 900, q: 0.55 },
+  alta:  { lado: 1200, q: 0.70 }
+};
+
 /** Qual status "ganha" quando a mesma tarefa-dia aparece repetida. */
 var PESO_STATUS = { aprovada: 5, marcada: 4, recusada: 3, pendente: 2, expirada: 1 };
 
@@ -348,6 +362,7 @@ function config() {
     tetoTela: Number(c.teto_tela_min || 40),
     codigoPai: String(c.codigo_pai || ''),
     codigoFilha: String(c.codigo_filha || ''),
+    qualidadeFoto: QUALIDADES[String(c.qualidade_foto || '').trim()] ? String(c.qualidade_foto).trim() : 'baixa',
     nomePai: c.nome_pai || 'Pai',
     nomeFilha: c.nome_filha || 'Filha',
     emojiFilha: c.emoji_filha || '🦄'
@@ -697,7 +712,9 @@ function montarEstado(pessoa, cfg) {
     semana: semana,
     cfg: {
       janelaAtraso: cfg.janelaAtraso, tetoTela: cfg.tetoTela,
-      taxaCofrinho: cfg.taxaCofrinho, nomeFilha: cfg.nomeFilha, emojiFilha: cfg.emojiFilha
+      taxaCofrinho: cfg.taxaCofrinho, nomeFilha: cfg.nomeFilha, emojiFilha: cfg.emojiFilha,
+      foto: QUALIDADES[cfg.qualidadeFoto] || QUALIDADES.baixa,
+      qualidadeFoto: cfg.qualidadeFoto
     },
     saldo: saldoDe(extrato),
     streak: calcularStreak(ocorrencias, hoje),
@@ -1379,6 +1396,7 @@ function instalar() {
      ['taxa_cofrinho', 0.3],
      ['janela_atraso', 2],
      ['teto_tela_min', 40],
+     ['qualidade_foto', 'baixa'],
      ['nome_pai', 'Pai'],
      ['nome_filha', 'Filha'],
      ['emoji_filha', '🦄'],

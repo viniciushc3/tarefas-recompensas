@@ -7,7 +7,7 @@ confere no seu, e as tarefas viram pontos, cofrinho e mesada.
 Sem app para instalar, sem loja, sem servidor. A planilha é o banco de dados
 **e** o seu painel de administração.
 
-- **Como testar:** `./scripts/testar.sh` (111 testes, sem Google e sem rede)
+- **Como testar:** `./scripts/testar.sh` (113 testes, sem Google e sem rede)
 - **As decisões de desenho:** [`docs/regras.md`](docs/regras.md)
 
 ## As três moedas
@@ -70,7 +70,7 @@ Linha digitada lá precisa só do título — o script completa o resto.
 | `Tarefas` | criar, mudar pontos, horário, recorrência, desativar |
 | `Recompensas` | preços, o que entra na loja, a meta grande |
 | `Faixas` | os valores da mesada por percentual |
-| `Config` | fuso, taxa do cofrinho, janela de atraso, teto de tela, códigos |
+| `Config` | fuso, taxa do cofrinho, janela de atraso, teto de tela, senhas, qualidade da foto |
 | `Ocorrencias`, `Extrato`, `Resgates`, `Semanas` | histórico — não precisa mexer |
 
 A planilha também ganha um menu **Tarefas** com atalhos para instalar, gerar os
@@ -148,6 +148,18 @@ conferência, um código daria acesso a qualquer arquivo do seu Drive.
 A imagem não viaja junto com o estado; é buscada só quando alguém vai olhar.
 E foto exige internet: se não houver, o app diz isso em vez de fingir que
 marcou.
+
+**Tamanho.** Medido com uma foto de celular de 3000×4000:
+
+| `qualidade_foto` | Resolução | Tamanho |
+|---|---|---|
+| `baixa` (padrão) | 480×640 | ~58 KB |
+| `media` | 675×900 | ~113 KB |
+| `alta` | 900×1200 | ~230 KB |
+
+Baixa basta para responder "a cama está arrumada?", e o tamanho pesa duas
+vezes: no envio dela e de novo quando você abre a fila. Troque em
+`qualidade_foto`, na aba Config.
 
 ## Duas telas, dois temas
 

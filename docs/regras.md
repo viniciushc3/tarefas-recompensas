@@ -157,9 +157,10 @@ o primeiro termina.
 Tarefa com `precisa_foto` abre a câmera ao ser marcada e sempre vai para a fila
 de aprovação — foto que ninguém olha não serve para nada.
 
-A imagem é reduzida no celular (1200px, qualidade 65%) antes de subir: foto de
-celular tem de 3 a 8 MB, e isso é a diferença entre esperar dois segundos e
-esperar meio minuto no 4G.
+A imagem é reduzida no celular antes de subir — por padrão para 480×640 a 45%,
+o que leva uma foto de 530 KB para 42 KB. Foto de celular tem de 3 a 8 MB, e o
+tamanho pesa duas vezes: no envio dela e de novo quando o pai abre a fila para
+olhar. `qualidade_foto` na aba Config aceita `baixa`, `media` ou `alta`.
 
 Fica no Drive **sem compartilhamento**. O app busca a imagem pelo próprio
 script, protegido pelo código, e o script confere que o arquivo pedido pertence
