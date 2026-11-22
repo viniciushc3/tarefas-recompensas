@@ -321,3 +321,62 @@ test('diagnóstico lista o que o script enxerga', () => {
   api.instalar();
   assert.match(api.diagnostico(), /Todas as abas existem/);
 });
+
+test('linha digitada à mão só precisa do título', () => {
+  const { api, cfg, hoje } = montar();
+  // Como você criaria uma tarefa: escrever o título e fechar a planilha.
+  api.anexar('Tarefas', { titulo: 'Passear com o cachorro', icone: '🐕', pontos: 25 });
+
+  estado(api, cfg.codigoFilha);   // abrir o app normaliza e gera
+
+  const nova = api.ler('Tarefas').find(t => t.titulo === 'Passear com o cachorro');
+  assert.ok(String(nova.id).startsWith('tf-'), 'não gerou id');
+  assert.equal(String(nova.criada_em), hoje, 'criada_em deveria ser hoje');
+  assert.equal(nova.tipo, 'extra');
+  assert.equal(nova.recorrencia, 'diaria');
+  assert.equal(nova.conta_mesada, 'sim', 'em branco não pode virar "fora da mesada"');
+  assert.equal(nova.ativa, 'sim');
+
+  const ocs = api.ler('Ocorrencias').filter(o => o.titulo === 'Passear com o cachorro');
+  assert.equal(ocs.length, 1, 'deveria gerar só hoje, não os 14 dias anteriores');
+  assert.equal(String(ocs[0].data), hoje);
+  assert.equal(Number(ocs[0].pontos), 25);
+});
+
+test('tarefa nova sem id não colide com outra sem id', () => {
+  const { api, cfg } = montar();
+  api.anexar('Tarefas', { titulo: 'Varrer a área', pontos: 10 });
+  api.anexar('Tarefas', { titulo: 'Dobrar a roupa', pontos: 10 });
+  estado(api, cfg.codigoFilha);
+
+  const ids = api.ler('Tarefas').map(t => String(t.id));
+  assert.equal(new Set(ids).size, ids.length, 'ids repetidos');
+  const titulos = api.ler('Ocorrencias').map(o => o.titulo);
+  assert.ok(titulos.includes('Varrer a área'));
+  assert.ok(titulos.includes('Dobrar a roupa'));
+});
+
+test('recompensa digitada à mão também se completa', () => {
+  const { api, cfg } = montar();
+  api.anexar('Recompensas', { titulo: 'Sorvete no domingo', icone: '🍦', custo: 200 });
+  const e = estado(api, cfg.codigoFilha);
+
+  const nova = api.ler('Recompensas').find(r => r.titulo === 'Sorvete no domingo');
+  assert.ok(String(nova.id).startsWith('rc-'));
+  assert.equal(nova.tipo, 'privilegio');
+  assert.equal(nova.bolso, 'gastavel');
+  assert.ok(e.recompensas.some(r => r.titulo === 'Sorvete no domingo'),
+    'deveria aparecer na loja dela');
+});
+
+test('instalar põe listas suspensas nas colunas de escolha', () => {
+  const { api } = montar();
+  const tarefas = api._ambiente._abas.get('Tarefas');
+  const campos = api.ABAS.Tarefas;
+  const colunasComLista = tarefas._validacoes.map(v => campos[v.c - 1]);
+  ['tipo', 'periodo', 'recorrencia', 'precisa_aprovacao', 'conta_mesada', 'ativa']
+    .forEach(c => assert.ok(colunasComLista.includes(c), 'falta lista em ' + c));
+  const recorrencia = tarefas._validacoes.find(v => campos[v.c - 1] === 'recorrencia');
+  assert.deepEqual(recorrencia.regra.valores,
+    ['diaria', 'semana', 'fimdesemana', 'dias', 'avulsa']);
+});

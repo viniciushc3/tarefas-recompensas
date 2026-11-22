@@ -6,6 +6,7 @@ const path = require('node:path');
 
 function criarAba(nome) {
   const linhas = [];
+  const validacoes = [];
   const faixa = (r, c, nr, nc) => ({
     setValues(vals) {
       for (let i = 0; i < vals.length; i++) {
@@ -23,10 +24,12 @@ function criarAba(nome) {
       return saida;
     },
     setFontWeight() { return this; },
+    setDataValidation(regra) { validacoes.push({ r, c, nr, regra }); return this; },
   });
 
   return {
     _linhas: linhas,
+    _validacoes: validacoes,
     getName: () => nome,
     getLastRow: () => linhas.length,
     setFrozenRows() { return this; },
@@ -77,6 +80,15 @@ function criarAmbiente({ fuso = 'America/Sao_Paulo' } = {}) {
     SpreadsheetApp: {
       getActive: () => planilha,
       getUi: () => ({ alert: m => { alertas.push(m); } }),
+      newDataValidation: () => {
+        const regra = { valores: null };
+        const b = {
+          requireValueInList(v) { regra.valores = v; return b; },
+          setAllowInvalid() { return b; },
+          build: () => regra,
+        };
+        return b;
+      },
     },
     Utilities: {
       formatDate(d, tz, fmt) {

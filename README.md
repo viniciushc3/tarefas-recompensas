@@ -68,7 +68,52 @@ Tudo que você vai querer mudar está **na planilha**, não no código:
 | `Ocorrencias`, `Extrato`, `Resgates`, `Semanas` | histórico — não precisa mexer |
 
 A planilha também ganha um menu **Tarefas** com atalhos para instalar, gerar os
-dias e ver os códigos.
+dias, ver os códigos e rodar um diagnóstico.
+
+### Criar uma tarefa
+
+Escreva uma linha nova na aba `Tarefas`. **Só o título é obrigatório** — o resto
+o script completa sozinho na próxima vez que o app abrir, e as colunas de
+escolha são listas suspensas, então não dá para errar a grafia.
+
+| Coluna | O que é | Em branco vira |
+|---|---|---|
+| `titulo` | o nome que ela vê | — (obrigatório) |
+| `icone` | um emoji; é como ela identifica antes de ler | vazio |
+| `tipo` | `extra` paga pontos, `basica` é dever | `extra` |
+| `pontos` | quanto paga (0 para `basica`) | `0` |
+| `periodo` | `manha`, `tarde`, `noite`, `qualquer` | `qualquer` |
+| `recorrencia` | `diaria`, `semana` (seg–sex), `fimdesemana`, `dias`, `avulsa` | `diaria` |
+| `dias` | com `dias`: `1,3,5` (0=dom). Com `avulsa`: a data, `2026-12-24` | vazio |
+| `precisa_aprovacao` | `sim` manda para a sua fila; `nao` credita na hora | `nao` |
+| `conta_mesada` | entra no percentual da semana e no streak | `sim` |
+| `ativa` | `nao` para de gerar; o histórico fica | `sim` |
+| `id`, `criada_em` | o script preenche | — |
+
+Deixe `precisa_aprovacao` em `nao` para o que você vê de qualquer jeito. Se tudo
+precisar da sua confirmação, você vira o gargalo e o app morre na terceira
+semana.
+
+`criada_em` existe para a tarefa nova **não** nascer com ocorrências atrasadas
+nos dias anteriores, que entrariam como não feitas e derrubariam a semana dela.
+
+Para desativar uma tarefa, ponha `ativa` em `nao` — não apague a linha, senão o
+histórico perde a referência.
+
+### Criar uma recompensa
+
+Mesma ideia na aba `Recompensas`: título e custo bastam.
+
+| Coluna | O que é | Em branco vira |
+|---|---|---|
+| `titulo`, `icone` | o que ela vê na loja | — / vazio |
+| `tipo` | `tela`, `privilegio` ou `meta` | `privilegio` |
+| `bolso` | `gastavel` ou `cofrinho` | `gastavel` (`cofrinho` se for `meta`) |
+| `custo` | preço em pontos | — (obrigatório) |
+| `minutos` | só para `tela`: quantos minutos vale | `0` |
+
+Só `meta` sai do cofrinho — é isso que impede ela de gastar a poupança da meta
+grande em tela.
 
 **Conte que a primeira semana vai estar mal calibrada.** Sempre está. O jeito
 certo é precificar **de trás pra frente**: decida o máximo de tela que você

@@ -262,6 +262,51 @@ function exigirPai(pessoa) {
   if (pessoa.papel !== 'pai') throw new Error('só o responsável pode fazer isso');
 }
 
+// ------------------------------------------------------- linhas novas
+/**
+ * Completa o que falta nas linhas digitadas à mão.
+ *
+ * A planilha é o painel de administração, então você vai criar tarefas
+ * escrevendo uma linha nova. Exigir que você invente um id único e preencha
+ * todas as colunas seria péssimo: aqui basta o título. O resto o script
+ * preenche na primeira vez que o app abrir.
+ */
+function normalizar(cfg) {
+  var hoje = hojeLocal(cfg);
+
+  ler('Tarefas').forEach(function (t) {
+    if (!String(t.titulo || '').trim()) return;   // linha em branco: ignora
+    var falta = function (campo) { return String(t[campo] === 0 ? '0' : (t[campo] || '')).trim() === ''; };
+
+    if (falta('id'))                escrever('Tarefas', t._linha, 'id', novoId('tf'));
+    // Sem isto, a tarefa nova nasceria com ocorrências nos 14 dias anteriores,
+    // todas expiradas, e derrubaria o percentual da semana dela.
+    if (falta('criada_em'))         escrever('Tarefas', t._linha, 'criada_em', hoje);
+    if (falta('tipo'))              escrever('Tarefas', t._linha, 'tipo', 'extra');
+    if (falta('pontos'))            escrever('Tarefas', t._linha, 'pontos', 0);
+    if (falta('periodo'))           escrever('Tarefas', t._linha, 'periodo', 'qualquer');
+    if (falta('recorrencia'))       escrever('Tarefas', t._linha, 'recorrencia', 'diaria');
+    if (falta('precisa_aprovacao')) escrever('Tarefas', t._linha, 'precisa_aprovacao', 'nao');
+    // Em branco significaria "não conta para a mesada", que não é o que
+    // alguém quer dizer ao deixar a célula vazia.
+    if (falta('conta_mesada'))      escrever('Tarefas', t._linha, 'conta_mesada', 'sim');
+    if (falta('ativa'))             escrever('Tarefas', t._linha, 'ativa', 'sim');
+  });
+
+  ler('Recompensas').forEach(function (r) {
+    if (!String(r.titulo || '').trim()) return;
+    var falta = function (campo) { return String(r[campo] === 0 ? '0' : (r[campo] || '')).trim() === ''; };
+
+    if (falta('id'))      escrever('Recompensas', r._linha, 'id', novoId('rc'));
+    if (falta('tipo'))    escrever('Recompensas', r._linha, 'tipo', 'privilegio');
+    // Meta grande sai só do cofrinho: é isso que impede gastar a poupança em tela.
+    if (falta('bolso'))   escrever('Recompensas', r._linha, 'bolso',
+                                   r.tipo === 'meta' ? 'cofrinho' : 'gastavel');
+    if (falta('minutos')) escrever('Recompensas', r._linha, 'minutos', 0);
+    if (falta('ativa'))   escrever('Recompensas', r._linha, 'ativa', 'sim');
+  });
+}
+
 // --------------------------------------------------- geração e expiração
 /**
  * Gera as ocorrências de um intervalo de dias, não só de hoje.
@@ -274,7 +319,10 @@ function exigirPai(pessoa) {
  */
 function garantirDias(cfg, diasParaTras) {
   var hoje = hojeLocal(cfg);
-  var tarefas = ler('Tarefas').filter(function (t) { return booleano(t.ativa); });
+  normalizar(cfg);
+  var tarefas = ler('Tarefas').filter(function (t) {
+    return booleano(t.ativa) && String(t.id || '').trim() !== '';
+  });
   var existentes = {};
   ler('Ocorrencias').forEach(function (o) { existentes[o.tarefa_id + '|' + o.data] = true; });
 
@@ -690,6 +738,8 @@ function instalar() {
     }
   });
 
+  listasSuspensas(existentes);
+
   // Remove a aba padrão vazia, se sobrou. Só se estiver realmente vazia:
   // apagar aba com conteúdo de alguém seria péssimo.
   ['Sheet1', 'Página1', 'Planilha1'].forEach(function (nome) {
@@ -809,6 +859,45 @@ function semearRecompensas() {
     anexar('Recompensas', {
       id: novoId('rc'), titulo: r[0], icone: r[1], tipo: r[2], bolso: r[3],
       custo: r[4], minutos: r[5], ativa: 'sim'
+    });
+  });
+}
+
+/**
+ * Transforma as colunas de escolha em listas suspensas.
+ *
+ * A planilha é o painel: você vai digitar linhas à mão, e "diária" com acento
+ * ou "Semana" com maiúscula fariam a tarefa simplesmente não aparecer. Com
+ * lista suspensa não tem como errar.
+ */
+function listasSuspensas(existentes) {
+  var opcoes = {
+    Tarefas: {
+      tipo: ['basica', 'extra'],
+      periodo: ['manha', 'tarde', 'noite', 'qualquer'],
+      recorrencia: ['diaria', 'semana', 'fimdesemana', 'dias', 'avulsa'],
+      precisa_aprovacao: ['sim', 'nao'],
+      conta_mesada: ['sim', 'nao'],
+      ativa: ['sim', 'nao']
+    },
+    Recompensas: {
+      tipo: ['tela', 'privilegio', 'meta'],
+      bolso: ['gastavel', 'cofrinho'],
+      ativa: ['sim', 'nao']
+    }
+  };
+
+  Object.keys(opcoes).forEach(function (nomeAba) {
+    var s = existentes[nomeAba];
+    if (!s) return;
+    Object.keys(opcoes[nomeAba]).forEach(function (campo) {
+      var coluna = ABAS[nomeAba].indexOf(campo) + 1;
+      if (coluna < 1) return;
+      var regra = SpreadsheetApp.newDataValidation()
+        .requireValueInList(opcoes[nomeAba][campo], true)
+        .setAllowInvalid(false)
+        .build();
+      s.getRange(2, coluna, 500, 1).setDataValidation(regra);
     });
   });
 }
