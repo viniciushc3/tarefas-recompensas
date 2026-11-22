@@ -1035,3 +1035,33 @@ test('desativar não apaga o que já foi feito', () => {
     'apagou uma tarefa já feita');
   assert.deepEqual(e.saldo, { gastavel: 14, cofrinho: 6 }, 'tirou os pontos dela');
 });
+
+test('coluna que falta entra sozinha, sem rodar instalar()', () => {
+  // O caso real: quem não rodou instalar() depois da atualização ficou com a
+  // aba Ocorrencias sem precisa_foto e sem foto. A geração escrevia sem elas,
+  // a leitura devolvia vazio, e nenhuma tarefa pedia foto — sem erro nenhum.
+  const { criarAmbiente } = require('./apps-script-falso');
+  const api = criarAmbiente();
+  const planilha = api._ambiente.SpreadsheetApp.getActive();
+
+  const antiga = api.ABAS.Ocorrencias.filter(c => c !== 'precisa_foto' && c !== 'foto');
+  planilha.insertSheet('Ocorrencias').getRange(1, 1, 1, antiga.length).setValues([antiga]);
+  api.instalar();
+
+  // Simula a aba voltando ao formato antigo depois do instalar.
+  const aba = api._ambiente._abas.get('Ocorrencias');
+  aba._linhas[0] = antiga.slice();
+
+  const cfg = api.config();
+  const t = api.ler('Tarefas').find(x => x.titulo === 'Lavar a louça');
+  api.escrever('Tarefas', t._linha, 'precisa_foto', 'sim');
+  api.escrever('Tarefas', t._linha, 'precisa_aprovacao', 'sim');
+
+  const e = api.chamar({ codigo: cfg.codigoFilha, acoes: [] });
+  assert.equal(e.ok, true, e.erro);
+  assert.ok(aba._linhas[0].includes('precisa_foto'), 'não acrescentou precisa_foto');
+  assert.ok(aba._linhas[0].includes('foto'), 'não acrescentou foto');
+
+  const oc = e.ocorrencias.find(o => o.titulo === 'Lavar a louça' && o.data === e.hoje);
+  assert.equal(oc.precisa_foto, true, 'a tarefa continuou sem pedir foto');
+});

@@ -22,6 +22,44 @@
   --bad:#f87171; --bad-soft:rgba(248,113,113,.14);
   --r:18px;
 }
+/* Tema dela: claro e macio. O escuro é bonito mas tem cara de ferramenta,
+   e quem abre isso todo dia é uma criança de 9 anos. O do pai continua
+   escuro — a tela dele é de trabalho. */
+body[data-papel="filha"]{
+  color-scheme: light;
+  --bg:#fff7fb; --card:#ffffff; --card2:#fbe9f4; --text:#4a3350; --muted:#9b85a6;
+  --line:rgba(120,70,120,.11);
+  --accent:#d6559e; --accent2:#b06ae0; --accent-soft:#fce3f1;
+  --cofre:#2f9fb5; --cofre-soft:#ddf2f6;
+  --ok:#2aa97a; --ok-soft:#ddf4ea;
+  --warn:#c9821c; --warn-soft:#fdefd9;
+  --bad:#d4556b; --bad-soft:#fde5e9;
+  --r:24px;
+  background:
+    radial-gradient(880px 420px at 92% -10%, #ffd7ec 0%, transparent 62%),
+    radial-gradient(720px 380px at -12% 4%, #e6dcff 0%, transparent 58%),
+    radial-gradient(520px 320px at 50% 108%, #d9f5ee 0%, transparent 60%),
+    var(--bg);
+  background-attachment: fixed;
+}
+body[data-papel="filha"] header{
+  background:rgba(255,247,251,.84);
+  border-bottom-color:rgba(120,70,120,.09);
+}
+body[data-papel="filha"] nav{
+  background:rgba(255,255,255,.9);
+  box-shadow:0 10px 34px rgba(170,110,160,.22);
+}
+body[data-papel="filha"] .logo{box-shadow:0 6px 20px rgba(214,85,158,.32)}
+body[data-papel="filha"] #toast{
+  background:#fff;box-shadow:0 10px 30px rgba(150,90,140,.26);color:var(--text);
+}
+body[data-papel="filha"] .card{box-shadow:0 2px 10px rgba(170,110,160,.07)}
+body[data-papel="filha"] .tarefa{box-shadow:0 2px 10px rgba(170,110,160,.07)}
+body[data-papel="filha"] .tit{font-size:1.02rem}
+body[data-papel="filha"] .box{border-radius:12px}
+body[data-papel="filha"] .saldo{border-radius:24px}
+
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;background:var(--bg);color:var(--text);
   font:15px/1.45 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
@@ -37,6 +75,9 @@ header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;
 .logo{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-size:20px;
   background:linear-gradient(135deg,var(--accent),var(--accent2));
   box-shadow:0 6px 20px rgba(124,107,255,.35)}
+#perfil{flex:1;min-width:0;display:flex;align-items:center;gap:12px;background:none;
+  border:0;padding:0;color:inherit;text-align:left;font:inherit}
+#perfil:active{opacity:.6}
 header .ttl{flex:1;min-width:0}
 header h1{margin:0;font-size:1.05rem;font-weight:800;letter-spacing:-.01em}
 header small{color:var(--muted);font-size:.8rem}
@@ -200,11 +241,13 @@ body.sem-codigo header,body.sem-codigo main,body.sem-codigo nav{display:none}
 </section>
 
 <header>
-  <div class="logo" id="logo">✅</div>
-  <div class="ttl">
-    <h1 id="titulo">Tarefas</h1>
-    <small id="subtitulo"></small>
-  </div>
+  <button id="perfil" aria-label="Perfil">
+    <span class="logo" id="logo">✅</span>
+    <span class="ttl">
+      <h1 id="titulo">Tarefas</h1>
+      <small id="subtitulo"></small>
+    </span>
+  </button>
 </header>
 
 <main>
@@ -688,6 +731,10 @@ const NAV = {
 function render() {
   if (!est) return;
   const papel = est.papel;
+  document.body.dataset.papel = papel;
+  const cor = papel === 'filha' ? '#fff7fb' : '#0b0d13';
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta && meta.content !== cor) meta.content = cor;
 
   $('#logo').textContent = papel === 'pai' ? '📥' : '✅';
   $('#titulo').textContent = papel === 'pai' ? 'Tarefas' : 'Oi, ' + est.nome;
@@ -1624,6 +1671,16 @@ function telaAjustes(el) {
 // =====================================================================
 // INÍCIO
 // =====================================================================
+// Tocar no nome é o lugar onde se procura "sair". Pergunta antes: sair sem
+// querer obriga a digitar o código de novo, e ela não tem o código.
+$('#perfil').addEventListener('click', () => {
+  if (!est) return;
+  const quem = est.papel === 'pai' ? 'você' : est.nome;
+  if (confirm(`Sair da conta de ${quem}?\n\nSerá preciso o código de acesso para entrar de novo.`)) {
+    sair();
+  }
+});
+
 if (!conf.url) $('#campoUrl').hidden = false;
 
 aba = recuperar(ABA, 'hoje');

@@ -404,3 +404,63 @@ test('ela fotografa a tarefa e a foto aparece na fila do pai', async (t) => {
   assert.deepEqual(erros, [], 'erro de JS na tela dela');
   assert.deepEqual(errosSeus, [], 'erro de JS na sua tela');
 });
+
+test('o tema dela é o claro, e tocar no nome sai da conta', async (t) => {
+  const api = criarAmbiente();
+  api.instalar();
+  const cfg = api.config();
+  const servidor = await subirServidor(api);
+  const url = 'http://127.0.0.1:' + servidor.address().port;
+  const navegador = await chromium.launch();
+  t.after(async () => { await navegador.close(); servidor.close(); });
+
+  const ctx = await navegador.newContext({ viewport: { width: 390, height: 844 } });
+  const p = await ctx.newPage();
+  const erros = await abrir(p, url, cfg.codigoFilha);
+
+  assert.equal(await p.getAttribute('body', 'data-papel'), 'filha');
+  const fundo = await p.evaluate(
+    () => getComputedStyle(document.body).getPropertyValue('--bg').trim());
+  assert.equal(fundo, '#fff7fb', 'a tela dela deveria estar no tema claro');
+  assert.equal(await p.getAttribute('meta[name="theme-color"]', 'content'), '#fff7fb');
+
+  // Sair: pergunta antes, porque ela não tem o código para voltar.
+  let perguntou = '';
+  p.on('dialog', d => { perguntou = d.message(); d.dismiss(); });
+  await p.click('#perfil');
+  await p.waitForTimeout(300);
+  assert.match(perguntou, /Sair da conta/);
+  assert.ok(!(await p.locator('#entrar').isVisible()), 'recusar não podia ter saído');
+
+  p.removeAllListeners('dialog');
+  p.on('dialog', d => d.accept());
+  await p.click('#perfil');
+  await p.waitForSelector('#entrar', { state: 'visible', timeout: 10000 });
+  // O endereço fixo continua guardado de propósito: ao voltar, ela digita só
+  // o código. O que não pode sobrar é o código.
+  const guardado = await p.evaluate(() => JSON.parse(localStorage.getItem('tr.conf')));
+  assert.equal(guardado.codigo, undefined, 'o código continuou no aparelho');
+  assert.equal(await p.evaluate(() => localStorage.getItem('tr.cache')), 'null',
+    'os dados dela continuaram no aparelho');
+  assert.ok(await p.locator('#inCodigo').isVisible());
+  assert.ok(!(await p.locator('#campoUrl').isVisible()), 'não deveria pedir o endereço de novo');
+
+  assert.deepEqual(erros, []);
+});
+
+test('a tela do pai continua no tema escuro', async (t) => {
+  const api = criarAmbiente();
+  api.instalar();
+  const cfg = api.config();
+  const servidor = await subirServidor(api);
+  const url = 'http://127.0.0.1:' + servidor.address().port;
+  const navegador = await chromium.launch();
+  t.after(async () => { await navegador.close(); servidor.close(); });
+
+  const p = await navegador.newPage();
+  await abrir(p, url, cfg.codigoPai);
+  assert.equal(await p.getAttribute('body', 'data-papel'), 'pai');
+  const fundo = await p.evaluate(
+    () => getComputedStyle(document.body).getPropertyValue('--bg').trim());
+  assert.equal(fundo, '#0b0d13');
+});

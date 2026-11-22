@@ -241,6 +241,23 @@ function ler(nome) {
   var v = s.getDataRange().getValues();
   if (v.length < 2) return [];
   var cab = v[0].map(function (c) { return String(c).trim(); });
+
+  // Coluna nova entra sozinha, sem depender de ninguém rodar instalar().
+  //
+  // Quando acrescentei precisa_foto e foto, quem não rodou instalar() ficou
+  // com a aba antiga: a geração escrevia sem as colunas, a leitura devolvia
+  // vazio, e nenhuma tarefa pedia foto — em silêncio, que é o pior jeito de
+  // falhar.
+  var esperadas = ABAS[nome] || [];
+  var util = cab.slice();
+  while (util.length && util[util.length - 1] === '') util.pop();
+  var faltando = esperadas.filter(function (c) { return cab.indexOf(c) < 0; });
+  if (faltando.length) {
+    s.getRange(1, util.length + 1, 1, faltando.length)
+      .setValues([faltando]).setFontWeight('bold');
+    cab = util.concat(faltando);
+    delete _cabecalhos[nome];
+  }
   var datas = COLUNAS_DATA[nome] || {};
   var saida = [];
   for (var i = 1; i < v.length; i++) {
@@ -467,9 +484,13 @@ function garantirDias(cfg, diasParaTras) {
   var tarefas = ler('Tarefas').filter(function (t) {
     return booleano(t.ativa) && String(t.id || '').trim() !== '';
   });
-  // Gerar o dia custa a leitura da aba inteira e um varrimento de 15 dias.
-  // Não precisa acontecer a cada toque: uma vez por dia basta, ou quando o
-  // conjunto de tarefas ativas muda.
+  // Sempre, mesmo quando o dia já foi gerado: o que ainda está pendente tem
+  // de refletir a tarefa como ela é agora. Não custa leitura extra, porque a
+  // aba de ocorrências é lida de qualquer jeito para montar a tela.
+  alinharPendentes(cfg, tarefas, hoje);
+
+  // Gerar o dia custa um varrimento de 15 dias. Não precisa acontecer a cada
+  // toque: uma vez por dia basta, ou quando o conjunto de tarefas muda.
   var assinatura = hoje + '|' + tarefas.length;
   if (lerConfig('ultima_geracao') === assinatura) return 0;
 
@@ -516,6 +537,47 @@ function garantirDias(cfg, diasParaTras) {
   expirarVencidas(cfg, hoje);
   gravarConfig('ultima_geracao', assinatura);
   return novas.length;
+}
+
+/**
+ * Põe as ocorrências pendentes de hoje em diante de acordo com a tarefa.
+ *
+ * Retrato protege histórico, não o que ainda não aconteceu. E conserta o caso
+ * em que a ocorrência nasceu numa planilha que ainda não tinha a coluna: sem
+ * isto, uma tarefa que passou a pedir foto só passaria a pedir amanhã.
+ *
+ * Só escreve quando algo mudou de verdade — no dia a dia não escreve nada.
+ */
+function alinharPendentes(cfg, tarefas, hoje) {
+  var porId = {};
+  tarefas.forEach(function (t) { porId[String(t.id)] = t; });
+
+  var alterados = 0;
+  ler('Ocorrencias').forEach(function (o) {
+    if (o.status !== 'pendente' || String(o.data) < hoje) return;
+    var t = porId[String(o.tarefa_id)];
+    if (!t) return;
+
+    var esperado = {
+      titulo: t.titulo,
+      icone: t.icone,
+      pontos: Number(t.pontos) || 0,
+      tipo: t.tipo,
+      periodo: t.periodo || 'qualquer',
+      conta_mesada: booleano(t.conta_mesada) ? 'sim' : 'nao',
+      precisa_aprovacao: booleano(t.precisa_aprovacao) ? 'sim' : 'nao',
+      precisa_foto: booleano(t.precisa_foto) ? 'sim' : 'nao'
+    };
+
+    var diferente = Object.keys(esperado).some(function (c) {
+      return String(o[c] === 0 ? '0' : (o[c] || '')) !== String(esperado[c]);
+    });
+    if (!diferente) return;
+
+    escreverLinha('Ocorrencias', o, esperado);
+    alterados++;
+  });
+  return alterados;
 }
 
 /**

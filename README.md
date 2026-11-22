@@ -7,7 +7,7 @@ confere no seu, e as tarefas viram pontos, cofrinho e mesada.
 Sem app para instalar, sem loja, sem servidor. A planilha é o banco de dados
 **e** o seu painel de administração.
 
-- **Como testar:** `./scripts/testar.sh` (98 testes, sem Google e sem rede)
+- **Como testar:** `./scripts/testar.sh` (101 testes, sem Google e sem rede)
 - **As decisões de desenho:** [`docs/regras.md`](docs/regras.md)
 
 ## As três moedas
@@ -148,6 +148,12 @@ conferência, um código daria acesso a qualquer arquivo do seu Drive.
 A imagem não viaja junto com o estado; é buscada só quando alguém vai olhar.
 E foto exige internet: se não houver, o app diz isso em vez de fingir que
 marcou.
+
+## Duas telas, dois temas
+
+A dela é clara e macia; a sua é escura. O escuro é bonito mas tem cara de
+ferramenta, e quem abre aquilo todo dia é uma criança. Tocar no nome, no topo,
+sai da conta — com confirmação, porque voltar exige o código.
 
 ## O que o app não faz
 
