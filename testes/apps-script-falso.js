@@ -52,6 +52,8 @@ function conferirValidacao(validacoes, linha, coluna, valor) {
   for (const v of validacoes) {
     if (v.c !== coluna) continue;
     if (linha < v.r || linha >= v.r + v.nr) continue;
+    // Com allowInvalid a planilha aceita e só marca a célula com um aviso.
+    if (v.regra && v.regra.permiteInvalido) continue;
     const lista = v.regra && v.regra.valores;
     if (lista && lista.indexOf(String(valor)) < 0) {
       throw new Error('Os dados inseridos na célula ' +
@@ -157,10 +159,10 @@ function criarAmbiente({ fuso = 'America/Sao_Paulo' } = {}) {
       getActive: () => planilha,
       getUi: () => ({ alert: m => { alertas.push(m); } }),
       newDataValidation: () => {
-        const regra = { valores: null };
+        const regra = { valores: null, permiteInvalido: false };
         const b = {
           requireValueInList(v) { regra.valores = v; return b; },
-          setAllowInvalid() { return b; },
+          setAllowInvalid(v) { regra.permiteInvalido = v !== false; return b; },
           build: () => regra,
         };
         return b;
@@ -230,7 +232,7 @@ function criarAmbiente({ fuso = 'America/Sao_Paulo' } = {}) {
   const criar = new Function(...nomes, fonte + `
     return { instalar, doPost, doGet, config, ler, garantirDias, hojeLocal,
              inicioDaSemana, somarDias, escrever, anexar, saldoDe, diagnostico,
-             procurarAba, consertar, novoId, ABAS };
+             procurarAba, consertar, novoId, VERSAO, ABAS };
   `);
   const api = criar(...nomes.map(n => ambiente[n]));
 

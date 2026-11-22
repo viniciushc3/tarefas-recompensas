@@ -904,3 +904,57 @@ test('instalar de novo não acumula validação em lugar errado', () => {
   assert.equal(api._ambiente._abas.get('Tarefas')._validacoes.length, antes,
     'as validações estão se empilhando a cada instalar()');
 });
+
+test('instalar sobrevive a uma regra bloqueante deixada na coluna errada', () => {
+  // Exatamente a planilha que quebrou: versão anterior pôs "sim, nao" em cima
+  // de criada_em, e a partir daí o script não conseguia mais gravar a data.
+  // O erro estourava longe da causa, numa leitura, porque a planilha só
+  // descarrega as escritas pendentes quando alguém lê.
+  const { criarAmbiente } = require('./apps-script-falso');
+  const api = criarAmbiente();
+  const planilha = api._ambiente.SpreadsheetApp.getActive();
+
+  const ordemAntiga = api.ABAS.Tarefas.filter(c => c !== 'precisa_foto');
+  const tarefas = planilha.insertSheet('Tarefas');
+  tarefas.getRange(1, 1, 1, ordemAntiga.length).setValues([ordemAntiga]);
+
+  const bloqueante = () => api._ambiente.SpreadsheetApp.newDataValidation()
+    .requireValueInList(['sim', 'nao'], true).setAllowInvalid(false).build();
+
+  const colunaData = ordemAntiga.indexOf('criada_em') + 1;
+  assert.equal(colunaData, 12, 'na ordem antiga, criada_em é a coluna L');
+  tarefas.getRange(2, colunaData, 500, 1).setDataValidation(bloqueante());
+
+  // E uma regra perdida numa aba que as listas suspensas nem tocam: só a
+  // limpeza preventiva do instalar() alcança esta.
+  const ocorrencias = planilha.insertSheet('Ocorrencias');
+  ocorrencias.getRange(1, 1, 1, api.ABAS.Ocorrencias.length)
+    .setValues([api.ABAS.Ocorrencias]);
+  ocorrencias.getRange(2, api.ABAS.Ocorrencias.indexOf('status') + 1, 500, 1)
+    .setDataValidation(bloqueante());
+
+  api.instalar();   // não pode estourar
+
+  const cfg = api.config();
+  const e = estado(api, cfg.codigoFilha);
+  assert.ok(e.ocorrencias.length > 0, 'não chegou a gerar o dia');
+  assert.ok(api.ler('Tarefas').every(t => String(t.criada_em)),
+    'alguma tarefa ficou sem criada_em');
+});
+
+test('nenhuma regra de lista bloqueia a escrita do script', () => {
+  const { api } = montar();
+  ['Tarefas', 'Recompensas'].forEach(nome => {
+    api._ambiente._abas.get(nome)._validacoes.forEach(v => {
+      assert.equal(v.regra.permiteInvalido, true,
+        nome + ': regra bloqueante — uma hora ela trava o script');
+    });
+  });
+});
+
+test('a versão do script viaja para o app e para o diagnóstico', () => {
+  const { api, cfg } = montar();
+  const e = estado(api, cfg.codigoFilha);
+  assert.match(e.versao, /^\d{4}-\d{2}-\d{2}\.\d+$/, 'versão: ' + e.versao);
+  assert.match(api.diagnostico(), new RegExp('Versão do script: ' + e.versao));
+});

@@ -28,6 +28,12 @@ var ABAS = {
   Semanas:     ['semana', 'elegiveis', 'aprovadas', 'pct', 'valor', 'status']
 };
 
+/**
+ * Versão deste arquivo. Aparece no diagnóstico e na resposta do app.
+ * Serve para saber, sem adivinhação, qual código está realmente rodando.
+ */
+var VERSAO = '2026-11-22.4';
+
 /** Qual status "ganha" quando a mesma tarefa-dia aparece repetida. */
 var PESO_STATUS = { aprovada: 5, marcada: 4, recusada: 3, pendente: 2, expirada: 1 };
 
@@ -611,6 +617,7 @@ function montarEstado(pessoa, cfg) {
   var resumo = resumoDaSemana(ocorrencias, semana);
 
   return {
+    versao: VERSAO,
     papel: pessoa.papel,
     nome: pessoa.nome,
     // O painel de administração é a própria planilha: tarefas, preços e faixas
@@ -1174,6 +1181,14 @@ function instalar() {
   var existentes = {};
   planilha.getSheets().forEach(function (s) { existentes[s.getName()] = s; });
 
+  // Antes de qualquer escrita: tira validação de onde quer que esteja.
+  // Uma regra posta na coluna errada por uma versão anterior impede o script
+  // de gravar, e o erro estoura num ponto que não tem nada a ver com a causa.
+  Object.keys(ABAS).forEach(function (nome) {
+    var s = existentes[nome];
+    if (s) s.getRange(2, 1, 1000, 30).clearDataValidations();
+  });
+
   Object.keys(ABAS).forEach(function (nome) {
     var s = existentes[nome];
     if (!s) {
@@ -1376,9 +1391,16 @@ function listasSuspensas(existentes) {
     Object.keys(opcoes[nomeAba]).forEach(function (campo) {
       var coluna = cols.indexOf(campo) + 1;
       if (coluna < 1) return;
+      // setAllowInvalid(TRUE) de propósito.
+      //
+      // Com false, a planilha RECUSA a escrita e o script morre — foi o que
+      // aconteceu quando uma regra caiu na coluna errada, e o erro apareceu
+      // longe da causa. Com true a lista suspensa continua aparecendo para
+      // quem edita à mão, um valor estranho ganha um aviso, e o script nunca
+      // é bloqueado por causa de uma regra de interface.
       var regra = SpreadsheetApp.newDataValidation()
         .requireValueInList(opcoes[nomeAba][campo], true)
-        .setAllowInvalid(false)
+        .setAllowInvalid(true)
         .build();
       s.getRange(2, coluna, 500, 1).setDataValidation(regra);
     });
@@ -1472,7 +1494,7 @@ function renomearIdsRepetidos() {
  * O resultado aparece no registro de execução (Ctrl+Enter no editor).
  */
 function diagnostico() {
-  var linhas = [];
+  var linhas = ['Versão do script: ' + VERSAO];
   var planilha = null;
   try { planilha = SpreadsheetApp.getActive(); } catch (e) {
     linhas.push('getActive() deu erro: ' + e.message);
