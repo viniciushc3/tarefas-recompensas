@@ -1,98 +1,53 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Redirect } from 'expo-router';
+import { View } from 'react-native';
+import { useSessao } from '@/lib/sessao';
+import { configurado } from '@/lib/supabase';
+import { Aviso, Botao, Carregando, Cartao, Texto, Titulo } from '@/componentes/ui';
+import { esp, useCores } from '@/lib/tema';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+/** Porta de entrada: manda cada um para o seu app. */
+export default function Index() {
+  const { carregando, userId, profile, erro, sair } = useSessao();
+  const c = useCores();
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
+  if (!configurado) return <ConfiguracaoPendente />;
+  if (carregando) return <Carregando texto="Carregando…" />;
+  if (!userId) return <Redirect href="/entrar" />;
+
+  if (erro) {
     return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
+      <View style={{ flex: 1, justifyContent: 'center', gap: esp.lg, padding: esp.lg, backgroundColor: c.fundo }}>
+        <Aviso mensagem={erro} />
+        <Botao titulo="Sair" variante="neutro" onPress={() => void sair()} />
+      </View>
     );
   }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
+
+  if (!profile) return <Carregando texto="Carregando perfil…" />;
+
+  return profile.role === 'child'
+    ? <Redirect href="/(filha)/hoje" />
+    : <Redirect href="/(pai)/fila" />;
 }
 
-export default function HomeScreen() {
+/** Primeira coisa que acontece num setup novo: ainda não há projeto Supabase. */
+function ConfiguracaoPendente() {
+  const c = useCores();
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
-
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
-
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
-
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+    <View style={{ flex: 1, justifyContent: 'center', padding: esp.lg, gap: esp.lg, backgroundColor: c.fundo }}>
+      <Titulo>Falta conectar 🔌</Titulo>
+      <Cartao style={{ gap: esp.sm }}>
+        <Texto>
+          Crie o arquivo <Texto style={{ fontWeight: '800' }}>.env</Texto> na pasta{' '}
+          <Texto style={{ fontWeight: '800' }}>mobile/</Texto> com:
+        </Texto>
+        <Texto fraco style={{ fontSize: 13 }}>EXPO_PUBLIC_SUPABASE_URL=…</Texto>
+        <Texto fraco style={{ fontSize: 13 }}>EXPO_PUBLIC_SUPABASE_ANON_KEY=…</Texto>
+        <Texto fraco style={{ fontSize: 13 }}>
+          Os dois valores estão no painel do Supabase, em Project Settings → API.
+          Depois reinicie o app.
+        </Texto>
+      </Cartao>
+    </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
-  },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
-  },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
-  },
-  title: {
-    textAlign: 'center',
-  },
-  code: {
-    textTransform: 'uppercase',
-  },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
-  },
-});

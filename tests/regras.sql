@@ -294,6 +294,63 @@ begin
   raise notice 'ajuste com motivo ok';
 end $$;
 
+\echo '=== 14. sem sessão não dá para chamar nada ==='
+-- Regressão: 'algo <> NULL' é NULL e um IF com NULL não dispara. Como as
+-- funções são SECURITY DEFINER (leem a linha ignorando o RLS), comparar contra
+-- um current_family_id() nulo deixava passar quem não estava autenticado.
+do $$
+declare v_occ uuid; v_red uuid;
+begin
+  select id into v_occ from task_occurrences where status = 'pending' limit 1;
+  select id into v_red from redemptions limit 1;
+
+  perform set_config('test.uid', '', false);   -- sem auth.uid()
+
+  begin
+    perform public.claim_occurrence(v_occ);
+    raise exception 'FALHA: marcou tarefa sem sessão';
+  exception when others then
+    if sqlerrm like 'FALHA:%' then raise; end if;
+    assert sqlerrm like '%sem sessão%', format('erro inesperado: %s', sqlerrm);
+  end;
+
+  if v_red is not null then
+    begin
+      perform public.cancel_redemption(v_red);
+      raise exception 'FALHA: cancelou resgate sem sessão';
+    exception when others then
+      if sqlerrm like 'FALHA:%' then raise; end if;
+      assert sqlerrm like '%sem sessão%', format('erro inesperado: %s', sqlerrm);
+    end;
+  end if;
+
+  begin
+    perform public.request_redemption('00000000-0000-0000-0000-00000000c001');
+    raise exception 'FALHA: resgatou sem sessão';
+  exception when others then
+    if sqlerrm like 'FALHA:%' then raise; end if;
+    assert sqlerrm like '%sem sessão%', format('erro inesperado: %s', sqlerrm);
+  end;
+
+  raise notice 'funções fecham sem sessão';
+end $$;
+
+\echo '=== 15. o papel anon não executa função nenhuma ==='
+reset role;
+set role anon;
+do $$
+begin
+  begin
+    perform public.ensure_catch_up(1);
+    raise exception 'FALHA: anon executou ensure_catch_up';
+  exception when others then
+    if sqlerrm like 'FALHA:%' then raise; end if;
+    assert sqlerrm like '%permission denied%' or sqlerrm like '%permissão%',
+           format('erro inesperado: %s', sqlerrm);
+    raise notice 'anon barrado: %', sqlerrm;
+  end;
+end $$;
+
 reset role;
 \echo ''
 \echo '################ TODOS OS TESTES PASSARAM ################'

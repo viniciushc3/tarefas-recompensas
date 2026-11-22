@@ -109,6 +109,7 @@ create table task_occurrences (
 
   -- snapshots: o que valia no dia em que a ocorrência nasceu
   title_snapshot                text        not null,
+  icon_snapshot                 text,
   points_snapshot               int         not null,
   kind_snapshot                 task_kind   not null,
   counts_for_allowance_snapshot boolean     not null,
@@ -260,10 +261,11 @@ declare
 begin
   insert into task_occurrences (
     family_id, task_id, profile_id, local_date,
-    title_snapshot, points_snapshot, kind_snapshot, counts_for_allowance_snapshot,
+    title_snapshot, icon_snapshot, points_snapshot, kind_snapshot,
+    counts_for_allowance_snapshot,
     requires_approval_snapshot, requires_photo_snapshot, period_snapshot)
   select t.family_id, t.id, c.id, p_date,
-         t.title, t.points, t.kind, t.counts_for_allowance,
+         t.title, t.icon, t.points, t.kind, t.counts_for_allowance,
          t.requires_approval, t.requires_photo, t.period
     from tasks t
     join profiles c
@@ -363,14 +365,24 @@ declare
   v_occ    task_occurrences;
   v_today  date;
   v_window int;
+  v_family uuid := app.current_family_id();
+  v_uid    uuid := auth.uid();
 begin
+  -- Sem sessão não há nada a fazer aqui. A checagem é explícita porque
+  -- 'algo <> NULL' resulta NULL e um IF com NULL NÃO dispara: comparar contra
+  -- um current_family_id() nulo deixaria passar quem não está autenticado,
+  -- e esta função é SECURITY DEFINER, ou seja, lê a linha ignorando o RLS.
+  if v_family is null or v_uid is null then
+    raise exception 'sem sessão';
+  end if;
+
   select * into v_occ from task_occurrences where id = p_id;
   if not found then raise exception 'ocorrência não encontrada'; end if;
 
-  if v_occ.family_id <> app.current_family_id() then
+  if v_occ.family_id <> v_family then
     raise exception 'fora da família';
   end if;
-  if v_occ.profile_id <> auth.uid() and not app.is_parent() then
+  if v_occ.profile_id <> v_uid and not app.is_parent() then
     raise exception 'essa tarefa não é sua';
   end if;
   if v_occ.status not in ('pending', 'rejected') then
@@ -411,13 +423,16 @@ create or replace function public.decide_occurrence(
     p_id uuid, p_approve boolean, p_note text default null)
   returns task_occurrences language plpgsql security definer set search_path = public, pg_temp as
 $$
-declare v_occ task_occurrences;
+declare
+  v_occ    task_occurrences;
+  v_family uuid := app.current_family_id();
 begin
+  if v_family is null then raise exception 'sem sessão'; end if;
   if not app.is_parent() then raise exception 'só o responsável decide'; end if;
 
   select * into v_occ from task_occurrences where id = p_id;
   if not found then raise exception 'ocorrência não encontrada'; end if;
-  if v_occ.family_id <> app.current_family_id() then raise exception 'fora da família'; end if;
+  if v_occ.family_id <> v_family then raise exception 'fora da família'; end if;
   if v_occ.status <> 'claimed' then
     raise exception 'nada a decidir: status %', v_occ.status;
   end if;
@@ -450,7 +465,10 @@ declare
   v_spendable int;
   v_savings   int;
   v_red       redemptions;
+  v_uid       uuid := auth.uid();
 begin
+  if v_family is null or v_uid is null then raise exception 'sem sessão'; end if;
+
   select * into v_reward from rewards where id = p_reward_id;
   if not found or v_reward.family_id <> v_family then raise exception 'recompensa inválida'; end if;
   if not v_reward.active then raise exception 'recompensa indisponível'; end if;
@@ -503,12 +521,15 @@ end $$;
 create or replace function public.decide_redemption(p_id uuid, p_approve boolean)
   returns redemptions language plpgsql security definer set search_path = public, pg_temp as
 $$
-declare v_red redemptions;
+declare
+  v_red    redemptions;
+  v_family uuid := app.current_family_id();
 begin
+  if v_family is null then raise exception 'sem sessão'; end if;
   if not app.is_parent() then raise exception 'só o responsável decide'; end if;
 
   select * into v_red from redemptions where id = p_id;
-  if not found or v_red.family_id <> app.current_family_id() then
+  if not found or v_red.family_id <> v_family then
     raise exception 'resgate inválido';
   end if;
   if v_red.status <> 'requested' then raise exception 'resgate já está %', v_red.status; end if;
@@ -532,13 +553,18 @@ end $$;
 create or replace function public.cancel_redemption(p_id uuid)
   returns redemptions language plpgsql security definer set search_path = public, pg_temp as
 $$
-declare v_red redemptions;
+declare
+  v_red    redemptions;
+  v_family uuid := app.current_family_id();
+  v_uid    uuid := auth.uid();
 begin
+  if v_family is null or v_uid is null then raise exception 'sem sessão'; end if;
+
   select * into v_red from redemptions where id = p_id;
-  if not found or v_red.family_id <> app.current_family_id() then
+  if not found or v_red.family_id <> v_family then
     raise exception 'resgate inválido';
   end if;
-  if v_red.profile_id <> auth.uid() and not app.is_parent() then
+  if v_red.profile_id <> v_uid and not app.is_parent() then
     raise exception 'esse resgate não é seu';
   end if;
   if v_red.status <> 'requested' then raise exception 'resgate já está %', v_red.status; end if;
@@ -556,6 +582,7 @@ create or replace function public.fulfill_redemption(p_id uuid)
 $$
 declare v_red redemptions;
 begin
+  if app.current_family_id() is null then raise exception 'sem sessão'; end if;
   if not app.is_parent() then raise exception 'só o responsável entrega'; end if;
   update redemptions set status = 'fulfilled', fulfilled_at = now()
    where id = p_id and family_id = app.current_family_id() and status = 'approved'
@@ -573,6 +600,7 @@ create or replace function public.adjust_points(
 $$
 declare v_entry ledger_entries;
 begin
+  if app.current_family_id() is null then raise exception 'sem sessão'; end if;
   if not app.is_parent() then raise exception 'só o responsável ajusta'; end if;
   if coalesce(p_spendable, 0) = 0 and coalesce(p_savings, 0) = 0 then
     raise exception 'ajuste vazio';
@@ -609,6 +637,7 @@ declare
   v_closing  weekly_closings;
   v_i        int;
 begin
+  if v_family is null then raise exception 'sem sessão'; end if;
   if not app.is_parent() then raise exception 'só o responsável fecha a semana'; end if;
 
   v_week := date_trunc('week', coalesce(p_week_start, app.local_today(v_family)))::date;
@@ -732,7 +761,9 @@ create policy closings_parent_write on weekly_closings
   with check (family_id = app.current_family_id() and app.is_parent());
 
 -- --------------------------------------------------------------- grants
-revoke all on all functions in schema public from anon;
+-- Revogar de 'anon' não basta: funções nascem executáveis por PUBLIC, e anon
+-- herda disso. Revogamos de PUBLIC e devolvemos só para authenticated.
+revoke all on all functions in schema public from public, anon;
 
 grant execute on function public.ensure_catch_up(int)                    to authenticated;
 grant execute on function public.ensure_day(date)                        to authenticated;

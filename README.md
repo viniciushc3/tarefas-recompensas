@@ -12,19 +12,30 @@ pontos (tela e privilégios), cofrinho (meta grande) e mesada.
 
 | Parte | Situação |
 |---|---|
-| Esquema, funções, RLS | pronto e testado |
+| Esquema, funções, RLS | pronto e testado (15 casos) |
 | Bucket das fotos | pronto |
 | Seed calibrado | pronto |
-| App (Expo) | scaffold criado, telas pendentes |
+| App dela (Hoje, Loja, Meta, Extrato) | pronto |
+| App seu (Fila, Tarefas, Preços, Mesada) | pronto |
+| Lógica de streak e mesada | pronto e testado (20 casos) |
 | Push notification | pendente |
+| Build do APK (EAS) | pendente |
 
 ## Rodar os testes
 
-Não precisa de Supabase nem de internet — sobe um Postgres local, aplica a
-migração e roda a bateria de regras:
+Nenhum dos dois precisa de Supabase nem de internet.
+
+Regras do banco (sobe um Postgres local, aplica a migração e exercita as
+regras, incluindo os casos de RLS):
 
 ```bash
 ./scripts/testar-db.sh
+```
+
+Lógica do app (streak, percentual da semana, faixas de mesada, datas):
+
+```bash
+cd mobile && ./scripts/testar-logica.sh
 ```
 
 ## Subir no Supabase
@@ -46,8 +57,26 @@ supabase/migrations/0002_storage.sql
 
 5. Em **Project Settings → API**, copie a URL do projeto e a chave `anon`.
 
-Ela nunca digita senha: o app guarda a sessão dela no armazenamento seguro do
-aparelho e entra sozinho.
+6. No app, crie o `.env`:
+
+```bash
+cd mobile && cp .env.example .env
+```
+
+Preencha com os dois valores do passo anterior. Enquanto isso não existir, o
+app abre numa tela explicando o que falta em vez de quebrar.
+
+## Rodar o app
+
+```bash
+cd mobile && npx expo start
+```
+
+Abra pelo Expo Go nos dois celulares. Cada um entra com o seu e-mail; depois
+disso o app abre sozinho — ela nunca digita senha, porque a sessão fica guardada
+no aparelho.
+
+Para instalar de verdade (APK, sem loja), o próximo passo é o EAS Build.
 
 ## Calibração do catálogo
 
