@@ -43,11 +43,13 @@ function fabricarComoSheets(tz) {
   };
 }
 
-function criarAba(nome, comoSheets) {
+function criarAba(nome, comoSheets, contador) {
   const linhas = [];
   const validacoes = [];
+  const conta = k => { if (contador) contador[k] = (contador[k] || 0) + 1; };
   const faixa = (r, c, nr, nc) => ({
     setValues(vals) {
+      conta('escritas');
       for (let i = 0; i < vals.length; i++) {
         const alvo = r - 1 + i;
         while (linhas.length <= alvo) linhas.push([]);
@@ -58,6 +60,7 @@ function criarAba(nome, comoSheets) {
     },
     setValue(v) { return this.setValues([[v]]); },
     getValues() {
+      conta('leituras');
       const saida = [];
       for (let i = 0; i < nr; i++) saida.push((linhas[r - 1 + i] || []).slice(c - 1, c - 1 + nc));
       return saida;
@@ -73,17 +76,17 @@ function criarAba(nome, comoSheets) {
     getLastRow: () => linhas.length,
     getLastColumn: () => linhas.reduce((m, l) => Math.max(m, l.length), 0),
     setFrozenRows() { return this; },
-    appendRow(arr) { linhas.push(arr.map(comoSheets)); return this; },
+    appendRow(arr) { conta('escritas'); linhas.push(arr.map(comoSheets)); return this; },
     deleteRows(inicio, quantidade) { linhas.splice(inicio - 1, quantidade); return this; },
     getRange(r, c, nr, nc) { return faixa(r, c, nr ?? 1, nc ?? 1); },
     getDataRange() {
       const largura = linhas.reduce((m, l) => Math.max(m, l.length), 0);
       return {
-        getValues: () => linhas.map(l => {
+        getValues: () => (conta('leituras'), linhas.map(l => {
           const copia = l.slice();
           while (copia.length < largura) copia.push('');
           return copia;
-        }),
+        })),
       };
     },
   };
@@ -91,9 +94,10 @@ function criarAba(nome, comoSheets) {
 
 function criarAmbiente({ fuso = 'America/Sao_Paulo' } = {}) {
   const comoSheets = fabricarComoSheets(fuso);
+  const contador = { leituras: 0, escritas: 0 };
   const abas = new Map();
   // Planilha nova de verdade vem com a aba padrão.
-  abas.set('Página1', criarAba('Página1', comoSheets));
+  abas.set('Página1', criarAba('Página1', comoSheets, contador));
 
   const planilha = {
     getName: () => 'Planilha sem título',
@@ -103,7 +107,7 @@ function criarAmbiente({ fuso = 'America/Sao_Paulo' } = {}) {
     // getSheetByName() estourou "Planilha 0 não encontrada". O código não pode
     // mais depender dela — se voltar a usar, os testes quebram aqui.
     getSheetByName() { throw new Error('Planilha 0 não encontrada'); },
-    insertSheet(n) { const a = criarAba(n, comoSheets); abas.set(n, a); return a; },
+    insertSheet(n) { const a = criarAba(n, comoSheets, contador); abas.set(n, a); return a; },
     getSheets: () => [...abas.values()],
     deleteSheet(a) { abas.delete(a.getName()); },
   };
@@ -159,6 +163,7 @@ function criarAmbiente({ fuso = 'America/Sao_Paulo' } = {}) {
     Intl,
     _alertas: alertas,
     _abas: abas,
+    _contador: contador,
     _fuso: fuso,
   };
 

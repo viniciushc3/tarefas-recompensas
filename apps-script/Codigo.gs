@@ -215,7 +215,17 @@ function aba(nome) {
 }
 
 /** Lê uma aba como lista de objetos, usando a primeira linha como cabeçalho. */
+/**
+ * Cache por execução.
+ *
+ * Cada getValues() é uma ida ao servidor do Sheets, de 30 a 150ms. Uma
+ * requisição lia a mesma aba três vezes; agora lê uma. É de onde vem a maior
+ * parte da lentidão.
+ */
+var _cache = {};
+
 function ler(nome) {
+  if (_cache[nome]) return _cache[nome];
   var s = aba(nome);
   var v = s.getDataRange().getValues();
   if (v.length < 2) return [];
@@ -231,6 +241,7 @@ function ler(nome) {
     o._linha = i + 1;
     saida.push(o);
   }
+  _cache[nome] = saida;
   return saida;
 }
 
@@ -260,6 +271,7 @@ function anexar(nome, objeto) {
   aba(nome).appendRow(cols.map(function (c) {
     return objeto[c] === undefined || objeto[c] === null ? '' : objeto[c];
   }));
+  delete _cache[nome];
 }
 
 function escrever(nome, linha, campo, valor) {
@@ -268,6 +280,30 @@ function escrever(nome, linha, campo, valor) {
     throw new Error('a aba ' + nome + ' não tem a coluna ' + campo + ' — rode instalar()');
   }
   aba(nome).getRange(linha, col).setValue(valor);
+
+  // Mantém o cache coerente em vez de jogá-lo fora: a próxima leitura não
+  // precisa de outra ida ao servidor.
+  var linhas = _cache[nome];
+  if (linhas) {
+    for (var i = 0; i < linhas.length; i++) {
+      if (linhas[i]._linha === linha) { linhas[i][campo] = valor; break; }
+    }
+  }
+}
+
+/**
+ * Grava vários campos de uma linha numa única ida ao servidor.
+ *
+ * Salvar uma tarefa mexia em 11 colunas, uma chamada por coluna. Agora é uma.
+ * Recebe a própria linha devolvida por ler(), então nem precisa reler antes.
+ */
+function escreverLinha(nome, registro, campos) {
+  var cols = cabecalho(nome);
+  Object.keys(campos).forEach(function (c) { registro[c] = campos[c]; });
+  var valores = cols.map(function (c) {
+    return registro[c] === undefined || registro[c] === null ? '' : registro[c];
+  });
+  aba(nome).getRange(registro._linha, 1, 1, cols.length).setValues([valores]);
 }
 
 function booleano(v) {
@@ -289,6 +325,20 @@ function config() {
     emojiFilha: c.emoji_filha || '🦄'
   };
 }
+
+function gravarConfig(chave, valor) {
+  var linha = ler('Config').filter(function (c) { return c.chave === chave; })[0];
+  if (linha) escrever('Config', linha._linha, 'valor', valor);
+  else anexar('Config', { chave: chave, valor: valor });
+}
+
+function lerConfig(chave) {
+  var linha = ler('Config').filter(function (c) { return c.chave === chave; })[0];
+  return linha ? String(linha.valor || '') : '';
+}
+
+/** Obriga a próxima requisição a gerar o dia de novo. */
+function marcarGeracaoVencida() { gravarConfig('ultima_geracao', ''); }
 
 function hojeLocal(cfg) {
   return Utilities.formatDate(new Date(), cfg.fuso, 'yyyy-MM-dd');
@@ -331,32 +381,40 @@ function normalizar(cfg) {
     if (!String(t.titulo || '').trim()) return;   // linha em branco: ignora
     var falta = function (campo) { return String(t[campo] === 0 ? '0' : (t[campo] || '')).trim() === ''; };
 
-    if (falta('id'))                escrever('Tarefas', t._linha, 'id', novoId('tf'));
+    var novos = {};
+    if (falta('id'))                novos.id = novoId('tf');
     // Sem isto, a tarefa nova nasceria com ocorrências nos 14 dias anteriores,
     // todas expiradas, e derrubaria o percentual da semana dela.
-    if (falta('criada_em'))         escrever('Tarefas', t._linha, 'criada_em', hoje);
-    if (falta('tipo'))              escrever('Tarefas', t._linha, 'tipo', 'extra');
-    if (falta('pontos'))            escrever('Tarefas', t._linha, 'pontos', 0);
-    if (falta('periodo'))           escrever('Tarefas', t._linha, 'periodo', 'qualquer');
-    if (falta('recorrencia'))       escrever('Tarefas', t._linha, 'recorrencia', 'diaria');
-    if (falta('precisa_aprovacao')) escrever('Tarefas', t._linha, 'precisa_aprovacao', 'nao');
+    if (falta('criada_em'))         novos.criada_em = hoje;
+    if (falta('tipo'))              novos.tipo = 'extra';
+    if (falta('pontos'))            novos.pontos = 0;
+    if (falta('periodo'))           novos.periodo = 'qualquer';
+    if (falta('recorrencia'))       novos.recorrencia = 'diaria';
+    if (falta('precisa_aprovacao')) novos.precisa_aprovacao = 'nao';
     // Em branco significaria "não conta para a mesada", que não é o que
     // alguém quer dizer ao deixar a célula vazia.
-    if (falta('conta_mesada'))      escrever('Tarefas', t._linha, 'conta_mesada', 'sim');
-    if (falta('ativa'))             escrever('Tarefas', t._linha, 'ativa', 'sim');
+    if (falta('conta_mesada'))      novos.conta_mesada = 'sim';
+    if (falta('ativa'))             novos.ativa = 'sim';
+
+    if (Object.keys(novos).length) {
+      escreverLinha('Tarefas', t, novos);
+      marcarGeracaoVencida();   // tarefa nova: o dia precisa ser gerado
+    }
   });
 
   ler('Recompensas').forEach(function (r) {
     if (!String(r.titulo || '').trim()) return;
     var falta = function (campo) { return String(r[campo] === 0 ? '0' : (r[campo] || '')).trim() === ''; };
 
-    if (falta('id'))      escrever('Recompensas', r._linha, 'id', novoId('rc'));
-    if (falta('tipo'))    escrever('Recompensas', r._linha, 'tipo', 'privilegio');
+    var novos = {};
+    if (falta('id'))      novos.id = novoId('rc');
+    if (falta('tipo'))    novos.tipo = 'privilegio';
     // Meta grande sai só do cofrinho: é isso que impede gastar a poupança em tela.
-    if (falta('bolso'))   escrever('Recompensas', r._linha, 'bolso',
-                                   r.tipo === 'meta' ? 'cofrinho' : 'gastavel');
-    if (falta('minutos')) escrever('Recompensas', r._linha, 'minutos', 0);
-    if (falta('ativa'))   escrever('Recompensas', r._linha, 'ativa', 'sim');
+    if (falta('bolso'))   novos.bolso = r.tipo === 'meta' ? 'cofrinho' : 'gastavel';
+    if (falta('minutos')) novos.minutos = 0;
+    if (falta('ativa'))   novos.ativa = 'sim';
+
+    if (Object.keys(novos).length) escreverLinha('Recompensas', r, novos);
   });
 }
 
@@ -376,6 +434,12 @@ function garantirDias(cfg, diasParaTras) {
   var tarefas = ler('Tarefas').filter(function (t) {
     return booleano(t.ativa) && String(t.id || '').trim() !== '';
   });
+  // Gerar o dia custa a leitura da aba inteira e um varrimento de 15 dias.
+  // Não precisa acontecer a cada toque: uma vez por dia basta, ou quando o
+  // conjunto de tarefas ativas muda.
+  var assinatura = hoje + '|' + tarefas.length;
+  if (lerConfig('ultima_geracao') === assinatura) return 0;
+
   var existentes = {};
   ler('Ocorrencias').forEach(function (o) { existentes[o.tarefa_id + '|' + o.data] = true; });
 
@@ -390,30 +454,61 @@ function garantirDias(cfg, diasParaTras) {
       // fracasso antes de ela ter tido chance de fazer qualquer coisa.
       if (t.criada_em && dia < String(t.criada_em)) return;
       if (existentes[t.id + '|' + dia]) return;
-      novas.push([
-        novoId('oc'), dia, t.id, t.titulo, t.icone, Number(t.pontos) || 0, t.tipo,
-        t.periodo || 'qualquer',
-        booleano(t.conta_mesada) ? 'sim' : 'nao',
-        booleano(t.precisa_aprovacao) ? 'sim' : 'nao',
-        'pendente', '', ''
-      ]);
+      novas.push({
+        id: novoId('oc'), data: dia, tarefa_id: t.id, titulo: t.titulo, icone: t.icone,
+        pontos: Number(t.pontos) || 0, tipo: t.tipo, periodo: t.periodo || 'qualquer',
+        conta_mesada: booleano(t.conta_mesada) ? 'sim' : 'nao',
+        precisa_aprovacao: booleano(t.precisa_aprovacao) ? 'sim' : 'nao',
+        status: 'pendente', marcada_em: '', decidida_em: ''
+      });
       existentes[t.id + '|' + dia] = true;
     });
   }
   if (novas.length) {
     var s = aba('Ocorrencias');
-    s.getRange(s.getLastRow() + 1, 1, novas.length, ABAS.Ocorrencias.length).setValues(novas);
+    // Pelo cabeçalho real, não pela ordem de ABAS: planilha criada por versão
+    // anterior pode ter as colunas em outra ordem.
+    var cols = cabecalho('Ocorrencias');
+    s.getRange(s.getLastRow() + 1, 1, novas.length, cols.length).setValues(
+      novas.map(function (o) {
+        return cols.map(function (c) { return o[c] === undefined ? '' : o[c]; });
+      }));
+    // Escrita em bloco não passa por anexar(): sem isto, a própria resposta
+    // sairia com a lista velha e as tarefas novas não apareceriam.
+    delete _cache['Ocorrencias'];
   }
 
-  // Expira o que passou da janela. Expirada conta como NÃO feita na mesada,
-  // que é o comportamento correto.
-  var limite = somarDias(hoje, -cfg.janelaAtraso);
-  ler('Ocorrencias').forEach(function (o) {
-    if (o.status === 'pendente' && String(o.data) < limite) {
-      escrever('Ocorrencias', o._linha, 'status', 'expirada');
-    }
-  });
+  expirarVencidas(cfg, hoje);
+  gravarConfig('ultima_geracao', assinatura);
   return novas.length;
+}
+
+/**
+ * Expira o que passou da janela. Expirada conta como NÃO feita na mesada,
+ * que é o comportamento correto.
+ *
+ * Grava a coluna inteira de uma vez: antes era uma chamada por linha, e numa
+ * planilha com semanas de histórico isso sozinho levava segundos.
+ */
+function expirarVencidas(cfg, hoje) {
+  var limite = somarDias(hoje, -cfg.janelaAtraso);
+  var alvos = ler('Ocorrencias').filter(function (o) {
+    return o.status === 'pendente' && String(o.data) < limite;
+  });
+  if (!alvos.length) return 0;
+
+  var coluna = cabecalho('Ocorrencias').indexOf('status') + 1;
+  var primeira = alvos[0]._linha;
+  var ultima = alvos[alvos.length - 1]._linha;
+  var faixa = aba('Ocorrencias').getRange(primeira, coluna, ultima - primeira + 1, 1);
+  var valores = faixa.getValues();
+
+  alvos.forEach(function (o) {
+    valores[o._linha - primeira][0] = 'expirada';
+    o.status = 'expirada';          // mantém o cache coerente
+  });
+  faixa.setValues(valores);
+  return alvos.length;
 }
 
 // --------------------------------------------------------------- estado
@@ -451,9 +546,12 @@ function montarEstado(pessoa, cfg) {
       bolso: r.bolso, minutos: Number(r.minutos) || 0, status: r.status
     };
   });
-  var faixas = ler('Faixas').map(function (f) {
+  // A mesada só aparece na tela do pai. Ler Faixas e Semanas no celular dela
+  // seriam duas idas ao servidor para montar algo que ela nunca vê.
+  var ePai = pessoa.papel === 'pai';
+  var faixas = ePai ? ler('Faixas').map(function (f) {
     return { min_pct: Number(f.min_pct) || 0, valor: Number(f.valor) || 0, rotulo: f.rotulo };
-  });
+  }) : [];
 
   var semana = inicioDaSemana(hoje);
   var resumo = resumoDaSemana(ocorrencias, semana);
@@ -463,7 +561,7 @@ function montarEstado(pessoa, cfg) {
     nome: pessoa.nome,
     // O painel de administração é a própria planilha: tarefas, preços e faixas
     // se editam lá, não numa tela que eu teria de construir e você manter.
-    planilha: pessoa.papel === 'pai' ? ss().getUrl() : '',
+    planilha: ePai ? ss().getUrl() : '',
     hoje: hoje,
     semana: semana,
     cfg: {
@@ -488,7 +586,7 @@ function montarEstado(pessoa, cfg) {
     recompensas: recompensas,
     // Para a tela de edição: tudo, inclusive desativado. Só para o pai — a
     // filha não precisa ver o que está fora da loja.
-    tarefas: pessoa.papel === 'pai' ? ler('Tarefas').map(function (t) {
+    tarefas: ePai ? ler('Tarefas').map(function (t) {
       return {
         id: t.id, titulo: t.titulo, icone: t.icone, tipo: t.tipo,
         pontos: Number(t.pontos) || 0, periodo: t.periodo || 'qualquer',
@@ -498,7 +596,7 @@ function montarEstado(pessoa, cfg) {
         ativa: booleano(t.ativa)
       };
     }) : [],
-    catalogo: pessoa.papel === 'pai' ? ler('Recompensas').map(function (r) {
+    catalogo: ePai ? ler('Recompensas').map(function (r) {
       return {
         id: r.id, titulo: r.titulo, icone: r.icone, tipo: r.tipo,
         bolso: r.bolso, custo: Number(r.custo) || 0,
@@ -507,7 +605,7 @@ function montarEstado(pessoa, cfg) {
     }) : [],
     resgates: resgates.slice(-40),
     extrato: extrato.slice(-80).reverse(),
-    semanas: ler('Semanas').map(function (s) {
+    semanas: !ePai ? [] : ler('Semanas').map(function (s) {
       return {
         semana: String(s.semana), elegiveis: Number(s.elegiveis) || 0,
         aprovadas: Number(s.aprovadas) || 0, pct: Number(s.pct) || 0,
@@ -553,12 +651,12 @@ function acaoMarcar(pessoa, cfg, dados) {
   if (data < somarDias(hoje, -cfg.janelaAtraso)) throw new Error('passou do prazo para marcar');
 
   var novo = booleano(oc.precisa_aprovacao) ? 'marcada' : 'aprovada';
-  escrever('Ocorrencias', oc._linha, 'status', novo);
-  escrever('Ocorrencias', oc._linha, 'marcada_em', agora(cfg));
-  if (novo === 'aprovada') {
-    escrever('Ocorrencias', oc._linha, 'decidida_em', agora(cfg));
-    creditar(cfg, oc);
-  }
+  escreverLinha('Ocorrencias', oc, {
+    status: novo,
+    marcada_em: agora(cfg),
+    decidida_em: novo === 'aprovada' ? agora(cfg) : oc.decidida_em
+  });
+  if (novo === 'aprovada') creditar(cfg, oc);
   return { status: novo };
 }
 
@@ -568,8 +666,10 @@ function acaoDecidir(pessoa, cfg, dados) {
   if (!oc) throw new Error('tarefa não encontrada');
   if (oc.status !== 'marcada') throw new Error('nada a decidir: está ' + oc.status);
 
-  escrever('Ocorrencias', oc._linha, 'status', dados.aprovar ? 'aprovada' : 'recusada');
-  escrever('Ocorrencias', oc._linha, 'decidida_em', agora(cfg));
+  escreverLinha('Ocorrencias', oc, {
+    status: dados.aprovar ? 'aprovada' : 'recusada',
+    decidida_em: agora(cfg)
+  });
   if (dados.aprovar) creditar(cfg, oc);
   return { status: dados.aprovar ? 'aprovada' : 'recusada' };
 }
@@ -619,8 +719,10 @@ function acaoDecidirResgate(pessoa, cfg, dados) {
   if (!rg) throw new Error('resgate não encontrado');
   if (rg.status !== 'pedido') throw new Error('esse resgate já está ' + rg.status);
 
-  escrever('Resgates', rg._linha, 'status', dados.aprovar ? 'aprovado' : 'recusado');
-  escrever('Resgates', rg._linha, 'decidido_em', agora(cfg));
+  escreverLinha('Resgates', rg, {
+    status: dados.aprovar ? 'aprovado' : 'recusado',
+    decidido_em: agora(cfg)
+  });
   if (!dados.aprovar) devolver(cfg, rg, 'Recusado');
   return { status: dados.aprovar ? 'aprovado' : 'recusado' };
 }
@@ -631,8 +733,7 @@ function acaoCancelar(pessoa, cfg, dados) {
   if (!rg) throw new Error('resgate não encontrado');
   if (rg.status !== 'pedido') throw new Error('esse resgate já está ' + rg.status);
 
-  escrever('Resgates', rg._linha, 'status', 'cancelado');
-  escrever('Resgates', rg._linha, 'decidido_em', agora(cfg));
+  escreverLinha('Resgates', rg, { status: 'cancelado', decidido_em: agora(cfg) });
   devolver(cfg, rg, 'Cancelado');
   return { status: 'cancelado' };
 }
@@ -674,11 +775,10 @@ function acaoFecharSemana(pessoa, cfg, dados) {
   var existente = ler('Semanas').filter(function (s) { return String(s.semana) === semana; })[0];
   if (existente) {
     if (existente.status === 'paga') throw new Error('essa semana já foi paga');
-    escrever('Semanas', existente._linha, 'elegiveis', resumo.elegiveis);
-    escrever('Semanas', existente._linha, 'aprovadas', resumo.aprovadas);
-    escrever('Semanas', existente._linha, 'pct', resumo.pct);
-    escrever('Semanas', existente._linha, 'valor', valor);
-    escrever('Semanas', existente._linha, 'status', 'fechada');
+    escreverLinha('Semanas', existente, {
+      elegiveis: resumo.elegiveis, aprovadas: resumo.aprovadas,
+      pct: resumo.pct, valor: valor, status: 'fechada'
+    });
   } else {
     anexar('Semanas', {
       semana: semana, elegiveis: resumo.elegiveis, aprovadas: resumo.aprovadas,
@@ -740,9 +840,8 @@ function acaoSalvarTarefa(pessoa, cfg, dados) {
     : null;
 
   if (existente) {
-    Object.keys(campos).forEach(function (c) {
-      escrever('Tarefas', existente._linha, c, campos[c]);
-    });
+    escreverLinha('Tarefas', existente, campos);
+    marcarGeracaoVencida();   // mudou tarefa: o dia precisa ser gerado de novo
     return { id: existente.id, novo: false };
   }
 
@@ -784,9 +883,7 @@ function acaoSalvarRecompensa(pessoa, cfg, dados) {
     : null;
 
   if (existente) {
-    Object.keys(campos).forEach(function (c) {
-      escrever('Recompensas', existente._linha, c, campos[c]);
-    });
+    escreverLinha('Recompensas', existente, campos);
     return { id: existente.id, novo: false };
   }
 
@@ -855,6 +952,11 @@ function tratar(entrada) {
 }
 
 function responder(entrada) {
+  // Cada requisição começa com a planilha "fria". No Apps Script cada chamada
+  // já é uma execução nova, mas deixar explícito evita que o cache sobreviva
+  // a algo e sirva dado velho.
+  _cache = {};
+  _cabecalhos = {};
   try {
     return json(comTrava(function () {
       var r = tratar(entrada);
@@ -1131,6 +1233,7 @@ function consertar() {
   if (removidas <= 0) return 'Nada repetido: ' + ficam.length + ' ocorrências.';
 
   s.deleteRows(2, v.length - 1);
+  delete _cache['Ocorrencias'];
   if (ficam.length) {
     s.getRange(2, 1, ficam.length, cab.length).setValues(ficam.map(function (l) {
       var linha = l.slice(0, cab.length);
