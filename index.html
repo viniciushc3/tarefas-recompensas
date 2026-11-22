@@ -40,13 +40,6 @@ header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;
 header .ttl{flex:1;min-width:0}
 header h1{margin:0;font-size:1.05rem;font-weight:800;letter-spacing:-.01em}
 header small{color:var(--muted);font-size:.8rem}
-#syncSt{font-size:.72rem;color:var(--muted);background:var(--card);border:1px solid var(--line);
-  padding:5px 10px;border-radius:99px;white-space:nowrap;max-width:40%;overflow:hidden;
-  text-overflow:ellipsis}
-#syncSt:empty{display:none}
-#syncSt[data-s=warn]{color:var(--warn);border-color:rgba(251,191,36,.3)}
-#syncSt[data-s=bad]{color:var(--bad);border-color:rgba(248,113,113,.3)}
-#syncSt[data-s=ok]{color:var(--ok);border-color:rgba(52,211,153,.25)}
 
 main{max-width:640px;margin:0 auto;padding:18px 16px 110px}
 nav{position:fixed;bottom:max(12px,env(safe-area-inset-bottom));left:50%;
@@ -196,7 +189,6 @@ body.sem-codigo header,body.sem-codigo main,body.sem-codigo nav{display:none}
     <h1 id="titulo">Tarefas</h1>
     <small id="subtitulo"></small>
   </div>
-  <span id="syncSt"></span>
 </header>
 
 <main>
@@ -237,10 +229,15 @@ function toast(msg) {
   toastTimer = setTimeout(() => el.classList.remove('on'), 3200);
 }
 
-function status(txt, s) {
-  const el = $('#syncSt');
-  el.textContent = txt || '';
-  if (s) el.dataset.s = s; else delete el.dataset.s;
+/**
+ * A sincronização não aparece para ninguém.
+ *
+ * "Enviando…", "esperando internet" e o selo em cada cartão só contavam para
+ * ela um problema que não é dela. O estado vai para um atributo do body:
+ * invisível na tela, visível para os testes.
+ */
+function status(_txt, estado) {
+  document.body.dataset.sync = estado || 'ok';
 }
 
 function guardar(chave, valor) {
@@ -316,7 +313,48 @@ async function postar(corpo) {
   return r.json();
 }
 
-let sincronizando = false, timerSync = null;
+let sincronizando = false, timerSync = null, pedidoDuranteEnvio = false;
+
+/**
+ * Resumo do que está desenhado na tela.
+ *
+ * Serve para não redesenhar quando a resposta do servidor não muda nada —
+ * era o "ficar alterando status na tela depois". Na maioria das vezes o
+ * servidor só confirma o que ela já viu acontecer.
+ */
+function assinaturaVisivel() {
+  if (!est) return '';
+  return [
+    est.saldo.gastavel, est.saldo.cofrinho, est.streak,
+    est.ocorrencias.map(o => o.id + o.status).join(','),
+    (est.resgates || []).map(r => r.id + r.status).join(','),
+    (est.tarefas || []).map(t => t.id + t.titulo + t.pontos + t.ativa).join(','),
+    (est.catalogo || []).map(r => r.id + r.titulo + r.custo + r.ativa).join(','),
+  ].join('|');
+}
+
+/**
+ * Reaplica na resposta nova o que ainda não chegou ao servidor.
+ *
+ * Sem isto a tela anda para trás: ela marca quatro tarefas, uma resposta que
+ * já estava a caminho chega sem elas, e some tudo. Foi o "0 de 8" na tela
+ * depois de marcar.
+ */
+function reaplicarFila() {
+  fila.forEach(a => {
+    if (a.acao === 'marcar' || a.acao === 'desmarcar') {
+      const o = est.ocorrencias.find(x => x.id === a.id);
+      if (!o) return;
+      if (a.acao === 'marcar' && marcavelAgora(o)) marcarLocal(o);
+      if (a.acao === 'desmarcar' && desmarcavelAgora(o)) desmarcarLocal(o);
+      return;
+    }
+    if (a.acao === 'pedir') {
+      const r = (est.recompensas || []).find(x => x.id === a.id);
+      if (r) pedirLocal(r);
+    }
+  });
+}
 
 function agendar(ms = 600) {
   clearTimeout(timerSync);
@@ -326,9 +364,10 @@ function agendar(ms = 600) {
 
 function mostrarStatus() {
   if (!conf.codigo) return;
-  if (sincronizando) return status('Enviando…', 'warn');
-  if (fila.length) return status(fila.length + ' esperando internet', 'warn');
-  status('Em dia', 'ok');
+  window.__filaPendente = fila.length;   // só para os testes saberem
+  if (sincronizando) return status('', 'enviando');
+  if (fila.length) return status('', 'pendente');
+  status('', 'ok');
 }
 
 /**
@@ -339,7 +378,11 @@ function mostrarStatus() {
  * rede mantém, para tentar depois.
  */
 async function sincronizar() {
-  if (!conf.url || !conf.codigo || sincronizando) return;
+  if (!conf.url || !conf.codigo) return;
+  // Já tem uma conversa em andamento: anota para ir de novo quando ela acabar,
+  // senão o que ela marcou durante o envio ficaria parado até o próximo ciclo.
+  if (sincronizando) { pedidoDuranteEnvio = true; return; }
+
   sincronizando = true;
   mostrarStatus();
   const enviadas = fila.slice();
@@ -351,29 +394,41 @@ async function sincronizar() {
 
     if (!r.ok) {
       sincronizando = false;
+      mostrarStatus();
       if (r.erro === 'codigo') { sair('Código de acesso inválido.'); return; }
-      status('A planilha recusou', 'bad');
       toast('A planilha recusou: ' + r.erro);
       return;
     }
 
-    // Tira da fila o que o servidor processou, com sucesso ou com erro de regra.
+    // Tira da fila o que o servidor processou, com sucesso ou com erro de
+    // regra. O que ela enfileirou durante o envio entrou depois, então os
+    // índices dos enviados continuam valendo.
     const processadas = new Set((r.resultados || []).map(x => x.ref));
-    fila = fila.filter((_, i) => !processadas.has(i));
+    fila = fila.filter((_, i) => !(i < enviadas.length && processadas.has(i)));
     guardar(FILA, fila);
 
-    (r.resultados || []).forEach(x => {
-      if (!x.ok) toast('Não deu: ' + x.erro);
-    });
+    // Erro de regra ela precisa saber (fora do prazo, já gastou). O resto, não.
+    (r.resultados || []).forEach(x => { if (!x.ok) toast(x.erro); });
 
+    const antes = assinaturaVisivel();
     est = r;
-    guardar(CACHE, est);
-    render();
+    reaplicarFila();
+    guardarCacheDepois();
+    // Só redesenha se algo mudou de verdade. Quase sempre o servidor apenas
+    // confirma o que ela já viu acontecer, e redesenhar à toa é o que fazia a
+    // tela "mexer sozinha" depois do toque.
+    if (assinaturaVisivel() !== antes) render();
   } catch {
-    status('Sem conexão · fila guardada', 'bad');
+    // Sem rede: a fila fica guardada e vai na próxima. Nada a dizer na tela.
   }
   sincronizando = false;
   mostrarStatus();
+
+  if (pedidoDuranteEnvio || fila.length) {
+    pedidoDuranteEnvio = false;
+    clearTimeout(timerSync);
+    timerSync = setTimeout(sincronizar, 400);
+  }
 }
 
 function enfileirar(acao) {
@@ -401,7 +456,6 @@ setInterval(() => {
 /** Mostra o efeito antes de o servidor confirmar, para o toque não parecer falho. */
 function marcarLocal(oc) {
   oc.status = oc.precisa_aprovacao ? 'marcada' : 'aprovada';
-  oc._pendente = true;
   if (oc.status === 'aprovada' && oc.pontos > 0) {
     const cofre = Math.floor(oc.pontos * (est.cfg.taxaCofrinho || 0.3));
     est.saldo.gastavel += oc.pontos - cofre;
@@ -414,7 +468,6 @@ function marcarLocal(oc) {
 function desmarcarLocal(oc) {
   const creditou = oc.status === 'aprovada' && oc.pontos > 0;
   oc.status = 'pendente';
-  oc._pendente = true;
   if (creditou) {
     const cofre = Math.floor(oc.pontos * (est.cfg.taxaCofrinho || 0.3));
     est.saldo.gastavel -= oc.pontos - cofre;
@@ -428,7 +481,7 @@ function pedirLocal(rec) {
   est.saldo[campo] -= rec.custo;
   est.resgates.push({
     id: 'local-' + Date.now(), quando: '', titulo: rec.titulo, custo: rec.custo,
-    bolso: rec.bolso, minutos: rec.minutos, status: 'pedido', _pendente: true,
+    bolso: rec.bolso, minutos: rec.minutos, status: 'pedido', local: true,
   });
   guardarCacheDepois();
 }
@@ -588,7 +641,6 @@ function conteudoTarefa(o, atrasada) {
   else tags.push('<span class="chip">dever</span>');
   if (esperando) tags.push('<span class="chip warn">esperando confirmação</span>');
   if (recusada) tags.push('<span class="chip bad">recusada · pode marcar de novo</span>');
-  if (o._pendente) tags.push('<span class="chip warn">⏱ vai sincronizar</span>');
   if (atrasada && marcavelAgora(o)) tags.push('<span class="chip warn">atrasada</span>');
 
   return `<span class="box">${feita ? '✓' : esperando ? '⏳' : ''}</span>
@@ -613,6 +665,12 @@ function repintarTarefa(botao, o) {
   botao.innerHTML = conteudoTarefa(o, atrasada);
 }
 
+function atualizarDica() {
+  const dica = document.getElementById('dicaDesmarcar');
+  if (!dica) return;
+  dica.hidden = !est.ocorrencias.some(o => o.data === est.hoje && desmarcavelAgora(o));
+}
+
 /** Atualiza os números do topo sem redesenhar nada em volta. */
 function repintarSaldos() {
   const g = document.querySelector('[data-saldo="gastavel"]');
@@ -634,22 +692,16 @@ function telaHoje(el) {
 
   let html = blocoSaldos();
 
-  if (fila.length) {
-    html += `<div class="aviso warn" style="margin-top:14px">
-      ${fila.length} ${fila.length === 1 ? 'marcação' : 'marcações'} esperando internet.
-      Já está salvo aqui, vai sincronizar sozinho.</div>`;
-  }
-
   if (!doDia.length) {
     html += vazio('🌤️', 'Dia livre!', 'Nenhuma tarefa marcada para hoje.');
   } else {
-    // Uma linha, não um aviso em cada cartão. Sem nenhuma pista ela não
-    // descobre que dá para desfazer, e o toque num cartão feito parecia o app
-    // travado.
-    if (doDia.some(o => desmarcavelAgora(o))) {
-      html += `<p class="muted xs" style="margin:18px 0 -6px">
-        Tocar numa tarefa feita desmarca ela.</p>`;
-    }
+    // Uma linha, não um aviso em cada cartão. Fica sempre no documento e só
+    // aparece quando há o que desfazer, porque o toque repinta um cartão só —
+    // se dependesse de redesenho completo, ela marcaria a primeira tarefa e
+    // nunca veria a dica.
+    html += `<p id="dicaDesmarcar" class="muted xs" style="margin:18px 0 -6px"
+      ${doDia.some(o => desmarcavelAgora(o)) ? '' : 'hidden'}>
+      Tocar numa tarefa feita desmarca ela.</p>`;
     for (const [id, nome] of PERIODOS) {
       const itens = doDia.filter(o => (o.periodo || 'qualquer') === id);
       if (!itens.length) continue;
@@ -682,6 +734,7 @@ function telaHoje(el) {
       repintarTarefa(b, oc);
       repintarSaldos();
       atualizarContagem();
+      atualizarDica();
       enfileirar({ acao: desfazendo ? 'desmarcar' : 'marcar', id: oc.id });
     };
   });
@@ -710,7 +763,7 @@ function telaLoja(el) {
       ${r.status === 'pedido' ? `
         <div style="margin-top:8px"><span class="chip warn">⏳ esperando confirmação</span></div>
         <p class="muted sm">Os pontos já saíram do seu saldo. Se ele recusar, eles voltam.</p>
-        ${r._pendente ? '' : `<button class="bt ghost" data-cancelar="${esc(r.id)}">
+        ${r.local ? '' : `<button class="bt ghost" data-cancelar="${esc(r.id)}">
           Desistir e pegar os pontos de volta</button>`}`
       : `<div style="margin-top:8px"><span class="chip ok">✅ aprovado — é só combinar com ele</span></div>`}
     </div>`).join('');
@@ -1350,7 +1403,7 @@ if (conf.codigo && est) {
   sincronizar();
 } else if (conf.codigo) {
   document.body.classList.remove('sem-codigo');
-  status('Carregando…');
+
   sincronizar();
 }
 

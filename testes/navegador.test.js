@@ -12,7 +12,7 @@ const { criarAmbiente } = require('./apps-script-falso');
 const RAIZ = path.join(__dirname, '..');
 const TIPOS = { '.html': 'text/html', '.webmanifest': 'application/manifest+json', '.js': 'text/javascript' };
 
-function subirServidor(api) {
+function subirServidor(api, atraso) {
   const servidor = http.createServer((req, res) => {
     if (req.url.startsWith('/api')) {
       let corpo = '';
@@ -21,8 +21,14 @@ function subirServidor(api) {
         let saida;
         try { saida = api.chamar(JSON.parse(corpo || '{}')); }
         catch (e) { saida = { ok: false, erro: String(e.message || e) }; }
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(saida));
+        const responder = () => {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(saida));
+        };
+        // O Apps Script leva de meio a dois segundos. Simular isso é o que faz
+        // aparecer o problema de resposta velha chegando em cima do que ela
+        // acabou de marcar.
+        if (atraso && atraso.ms) setTimeout(responder, atraso.ms); else responder();
       });
       return;
     }
@@ -133,7 +139,7 @@ test('a filha marca uma tarefa e o pai a vê na fila', async (t) => {
     () => document.querySelector('#v-editar').textContent.includes('Passear com o cachorro'),
     null, { timeout: 15000 });
   await pSeu.waitForFunction(
-    () => document.querySelector('#syncSt').textContent === 'Em dia',
+    () => document.body.dataset.sync === 'ok',
     null, { timeout: 15000 });
   const criada = api.ler('Tarefas').find(t => t.titulo === 'Passear com o cachorro');
   assert.ok(criada, 'a tarefa não chegou na planilha');
@@ -237,7 +243,7 @@ test('ela marca, sincroniza e desmarca com um toque', async (t) => {
   assert.equal(Number(await p.textContent('[data-saldo="gastavel"]')), 14);
 
   // Espera chegar na planilha, para o desfazer valer contra dado já gravado.
-  await p.waitForFunction(() => document.querySelector('#syncSt').textContent === 'Em dia',
+  await p.waitForFunction(() => document.body.dataset.sync === 'ok',
     null, { timeout: 15000 });
   assert.equal(api.ler('Extrato').filter(e => e.tipo === 'ganho').length, 1);
 
@@ -254,7 +260,7 @@ test('ela marca, sincroniza e desmarca com um toque', async (t) => {
   const demora = Date.now() - inicio;
   assert.ok(demora < 400, 'desmarcar levou ' + demora + 'ms na tela');
 
-  await p.waitForFunction(() => document.querySelector('#syncSt').textContent === 'Em dia',
+  await p.waitForFunction(() => document.body.dataset.sync === 'ok',
     null, { timeout: 15000 });
   assert.deepEqual(api.saldoDe(api.ler('Extrato')), { gastavel: 0, cofrinho: 0 },
     'a planilha não estornou');
@@ -267,10 +273,70 @@ test('ela marca, sincroniza e desmarca com um toque', async (t) => {
   await p.waitForFunction(
     () => Number(document.querySelector('[data-saldo="gastavel"]').textContent) === 14,
     null, { timeout: 5000 });
-  await p.waitForFunction(() => document.querySelector('#syncSt').textContent === 'Em dia',
+  await p.waitForFunction(() => document.body.dataset.sync === 'ok',
     null, { timeout: 15000 });
   assert.deepEqual(api.saldoDe(api.ler('Extrato')), { gastavel: 14, cofrinho: 6 });
 
   assert.deepEqual(erros, [], 'erro de JS durante marcar/desmarcar');
   console.log('      desmarcar -> tela: ' + demora + 'ms');
+});
+
+test('a tela nunca anda para trás enquanto a planilha responde devagar', async (t) => {
+  const api = criarAmbiente();
+  api.instalar();
+  const cfg = api.config();
+  const atraso = { ms: 0 };
+  const servidor = await subirServidor(api, atraso);
+  const url = 'http://127.0.0.1:' + servidor.address().port;
+  const navegador = await chromium.launch();
+  t.after(async () => { await navegador.close(); servidor.close(); });
+
+  const ctx = await navegador.newContext({ viewport: { width: 390, height: 844 } });
+  const p = await ctx.newPage();
+  const erros = await abrir(p, url, cfg.codigoFilha);
+
+  // A partir daqui a planilha demora, como a de verdade.
+  atraso.ms = 1500;
+
+  // Quatro tarefas distintas: o cartão feito também aceita toque agora, então
+  // clicar sempre no primeiro marcaria e desmarcaria a mesma.
+  const porFazer = '.tarefa:not(.feita):not(.esperando):not([disabled])';
+  const titulos = await p.locator(porFazer).evaluateAll(
+    nos => nos.slice(0, 4).map(n => n.querySelector('.tit').textContent.trim()));
+  assert.equal(titulos.length, 4);
+
+  // Ela marca uma, e marca mais três enquanto a primeira ainda está subindo.
+  await p.locator(porFazer, { hasText: titulos[0] }).first().click();
+  await p.waitForTimeout(800);           // tempo de o envio começar
+  for (const t of titulos.slice(1)) {
+    await p.locator(porFazer, { hasText: t }).first().click();
+  }
+
+  const feitasAgora = await p.locator('.tarefa.feita, .tarefa.esperando').count();
+  assert.equal(feitasAgora, 4, 'as quatro deveriam estar marcadas na hora');
+
+  // Vigia a tela: se a resposta velha apagar marcação, o mínimo cai.
+  await p.evaluate(() => {
+    window.__min = 99;
+    window.__vigia = setInterval(() => {
+      const n = document.querySelectorAll('.tarefa.feita, .tarefa.esperando').length;
+      if (n < window.__min) window.__min = n;
+    }, 25);
+  });
+
+  await p.waitForFunction(
+    () => document.body.dataset.sync === 'ok' && !window.__filaPendente,
+    null, { timeout: 30000 });
+  await p.waitForTimeout(500);
+  const minimo = await p.evaluate(() => { clearInterval(window.__vigia); return window.__min; });
+
+  assert.equal(minimo, 4,
+    'a tela desmarcou sozinha: chegou a mostrar ' + minimo + ' de 4 marcadas');
+  assert.equal(await p.locator('.tarefa.feita, .tarefa.esperando').count(), 4);
+
+  // E a planilha recebeu as quatro.
+  const marcadas = api.ler('Ocorrencias')
+    .filter(o => o.status === 'aprovada' || o.status === 'marcada').length;
+  assert.equal(marcadas, 4, 'a planilha ficou com ' + marcadas);
+  assert.deepEqual(erros, []);
 });

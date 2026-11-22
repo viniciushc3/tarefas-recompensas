@@ -7,7 +7,7 @@ confere no seu, e as tarefas viram pontos, cofrinho e mesada.
 Sem app para instalar, sem loja, sem servidor. A planilha é o banco de dados
 **e** o seu painel de administração.
 
-- **Como testar:** `./scripts/testar.sh` (80 testes, sem Google e sem rede)
+- **Como testar:** `./scripts/testar.sh` (81 testes, sem Google e sem rede)
 - **As decisões de desenho:** [`docs/regras.md`](docs/regras.md)
 
 ## As três moedas

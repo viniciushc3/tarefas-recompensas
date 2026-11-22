@@ -114,13 +114,31 @@ link da planilha — mesmo que mexa no app, que é um arquivo HTML público.
 A URL do app da web é pública por necessidade (o celular dela não faz login no
 Google). A barreira é o código: 8 caracteres de um alfabeto de 32.
 
-## Offline
+## Offline, e sincronização invisível
 
 A página é local-first. Ela desenha do `localStorage` e guarda as marcações numa
-fila, que sobe quando a rede volta. A marcação nunca **parece** ter falhado.
+fila, que sobe quando a rede volta.
 
-Erro de regra do servidor (fora do prazo, já decidida) descarta o item da fila —
-insistir não ajudaria. Erro de rede mantém.
+**A sincronização não aparece na tela.** Nada de "enviando", "esperando
+internet" ou selo em cada cartão: isso contava para uma criança de 9 anos um
+problema que não é dela, e fazia a tela se mexer sozinha depois do toque. O
+estado vai para um atributo do `body`, que só os testes leem. O que ela vê é
+erro de regra — "passou do prazo", "você já gastou esses pontos" — e mais nada.
+
+Três regras sustentam isso:
+
+1. **A tela nunca anda para trás.** Quando a resposta chega, o que ainda está
+   na fila é reaplicado por cima dela. Sem isso, uma resposta que já estava a
+   caminho chegava sem as marcações recentes e apagava quatro toques da tela.
+2. **Só redesenha se mudou.** Compara um resumo do que está desenhado antes e
+   depois; quase sempre o servidor só confirma o que ela já viu, e aí não se
+   toca na tela.
+3. **Nada pesado no caminho do toque.** O cartão tocado é repintado sozinho, e
+   a gravação do estado no aparelho fica para 400ms depois.
+
+Erro de regra do servidor descarta o item da fila — insistir não ajudaria. Erro
+de rede mantém, e uma ação feita durante um envio dispara outro envio assim que
+o primeiro termina.
 
 ## Arredondamento
 
