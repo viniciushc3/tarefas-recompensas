@@ -755,3 +755,109 @@ test('consertar devolve id próprio a tarefa que perdeu o dela', () => {
   assert.ok(e.ocorrencias.some(o => o.titulo === titulo && o.data === e.hoje),
     'a tarefa continuou sem aparecer: ' + titulo);
 });
+
+// --------------------------------------------------------------- fotos
+const UMA_FOTO = Buffer.from('foto de mentira').toString('base64');
+
+function tarefaComFoto(api, cfg) {
+  const e = estado(api, cfg.codigoPai);
+  return e.ocorrencias.find(o => o.data === e.hoje && o.precisa_foto);
+}
+
+test('tarefa que pede foto não é marcada sem foto', () => {
+  const { api, cfg } = montar();
+  const oc = tarefaComFoto(api, cfg);
+  assert.ok(oc, 'o conteúdo inicial deveria ter uma tarefa com foto');
+
+  const r = estado(api, cfg.codigoFilha, [{ acao: 'marcar', id: oc.id, ref: 0 }]);
+  assert.equal(r.resultados[0].ok, false);
+  assert.match(r.resultados[0].erro, /precisa de foto/);
+});
+
+test('enviar a foto e marcar, na mesma ida', () => {
+  const { api, cfg } = montar();
+  const oc = tarefaComFoto(api, cfg);
+
+  const r = estado(api, cfg.codigoFilha, [
+    { acao: 'enviarFoto', id: oc.id, dados: UMA_FOTO, mime: 'image/jpeg', ref: 0 },
+    { acao: 'marcar', id: oc.id, ref: 1 },
+  ]);
+  assert.equal(r.resultados[0].ok, true, r.resultados[0].erro);
+  assert.equal(r.resultados[1].ok, true, r.resultados[1].erro);
+
+  const depois = r.ocorrencias.find(o => o.id === oc.id);
+  assert.equal(depois.status, 'marcada', 'foto implica aprovação');
+  assert.ok(depois.foto, 'a ocorrência ficou sem referência de foto');
+
+  // e a imagem volta
+  const leitura = estado(api, cfg.codigoPai, [{ acao: 'foto', foto: depois.foto, ref: 0 }]);
+  assert.equal(leitura.resultados[0].ok, true, leitura.resultados[0].erro);
+  assert.equal(leitura.resultados[0].dados.dados, UMA_FOTO, 'voltou outra imagem');
+  assert.match(leitura.resultados[0].dados.mime, /^image\//);
+});
+
+test('não dá para pedir um arquivo qualquer do Drive', () => {
+  // Sem esta checagem, quem tivesse um código poderia ler QUALQUER arquivo do
+  // Drive de quem publicou o script, porque o script roda como essa pessoa.
+  const { api, cfg } = montar();
+  const drive = api._ambiente.DriveApp;
+  const alheio = drive.createFolder().createFile(
+    api._ambiente.Utilities.newBlob(Buffer.from('imposto de renda'), 'application/pdf', 'x.pdf'));
+
+  const r = estado(api, cfg.codigoFilha, [{ acao: 'foto', foto: alheio.getId(), ref: 0 }]);
+  assert.equal(r.resultados[0].ok, false);
+  assert.match(r.resultados[0].erro, /não encontrada/);
+});
+
+test('foto grande demais é recusada', () => {
+  const { api, cfg } = montar();
+  const oc = tarefaComFoto(api, cfg);
+  const enorme = 'A'.repeat(8000001);
+  const r = estado(api, cfg.codigoFilha, [
+    { acao: 'enviarFoto', id: oc.id, dados: enorme, mime: 'image/jpeg', ref: 0 },
+  ]);
+  assert.equal(r.resultados[0].ok, false);
+  assert.match(r.resultados[0].erro, /grande demais/);
+});
+
+test('pedir foto numa tarefa liga a aprovação sozinho', () => {
+  const { api, cfg } = montar();
+  const t = estado(api, cfg.codigoPai).tarefas.find(x => x.titulo === 'Tirar o lixo');
+  assert.equal(t.precisa_aprovacao, false);
+
+  estado(api, cfg.codigoPai, [{
+    acao: 'salvarTarefa', ref: 0,
+    tarefa: { ...t, precisa_foto: true, precisa_aprovacao: false },
+  }]);
+  const depois = estado(api, cfg.codigoPai).tarefas.find(x => x.id === t.id);
+  assert.equal(depois.precisa_foto, true);
+  assert.equal(depois.precisa_aprovacao, true, 'foto sem conferência não faz sentido');
+});
+
+test('desmarcar guarda a foto, para remarcar no mesmo dia não pedir outra', () => {
+  const { api, cfg } = montar();
+  const oc = tarefaComFoto(api, cfg);
+  estado(api, cfg.codigoFilha, [
+    { acao: 'enviarFoto', id: oc.id, dados: UMA_FOTO, mime: 'image/jpeg', ref: 0 },
+    { acao: 'marcar', id: oc.id, ref: 1 },
+  ]);
+  let r = estado(api, cfg.codigoFilha, [{ acao: 'desmarcar', id: oc.id, ref: 0 }]);
+  assert.equal(r.resultados[0].ok, true, r.resultados[0].erro);
+  assert.ok(r.ocorrencias.find(o => o.id === oc.id).foto, 'perdeu a foto ao desmarcar');
+
+  r = estado(api, cfg.codigoFilha, [{ acao: 'marcar', id: oc.id, ref: 0 }]);
+  assert.equal(r.resultados[0].ok, true, 'pediu foto de novo no mesmo dia');
+});
+
+test('a foto não viaja junto com o estado', () => {
+  // O estado é baixado a cada sincronização. Mandar imagem junto seria
+  // centenas de KB a cada 45 segundos.
+  const { api, cfg } = montar();
+  const oc = tarefaComFoto(api, cfg);
+  const e = estado(api, cfg.codigoFilha, [
+    { acao: 'enviarFoto', id: oc.id, dados: UMA_FOTO, mime: 'image/jpeg', ref: 0 },
+  ]);
+  const texto = JSON.stringify(e.ocorrencias);
+  assert.ok(!texto.includes(UMA_FOTO), 'a imagem foi junto no estado');
+  assert.ok(texto.length < 8000, 'estado inchou: ' + texto.length + ' bytes');
+});

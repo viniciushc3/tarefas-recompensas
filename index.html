@@ -486,6 +486,138 @@ function pedirLocal(rec) {
   guardarCacheDepois();
 }
 
+// --------------------------------------------------------------- fotos
+const fotosCarregadas = new Map();
+
+/** Abre a câmera. Resolve com null se ela desistir. */
+function pedirFoto() {
+  return new Promise(resolve => {
+    const entrada = document.createElement('input');
+    entrada.type = 'file';
+    entrada.accept = 'image/*';
+    entrada.capture = 'environment';
+    let resolvido = false;
+    const terminar = v => { if (!resolvido) { resolvido = true; resolve(v); } };
+
+    entrada.onchange = () => terminar(entrada.files && entrada.files[0] ? entrada.files[0] : null);
+    // Cancelar não dispara onchange em todo navegador; o foco voltando resolve.
+    window.addEventListener('focus', () => setTimeout(() => terminar(null), 800), { once: true });
+    entrada.click();
+  });
+}
+
+/**
+ * Encolhe a foto antes de mandar.
+ *
+ * Foto de celular tem 3 a 8 MB. Para conferir se a cama está arrumada, 1200px
+ * a 65% basta — e o que trafega vai para menos de 200 KB, que é a diferença
+ * entre esperar dois segundos e esperar meio minuto no 4G da rua.
+ */
+async function comprimir(arquivo, maxLado = 1200, qualidade = 0.65) {
+  const url = URL.createObjectURL(arquivo);
+  try {
+    const img = new Image();
+    await new Promise((ok, erro) => {
+      img.onload = ok;
+      img.onerror = () => erro(new Error('imagem inválida'));
+      img.src = url;
+    });
+    const k = Math.min(1, maxLado / Math.max(img.naturalWidth, img.naturalHeight));
+    const tela = document.createElement('canvas');
+    tela.width = Math.round(img.naturalWidth * k);
+    tela.height = Math.round(img.naturalHeight * k);
+    tela.getContext('2d').drawImage(img, 0, 0, tela.width, tela.height);
+    return tela.toDataURL('image/jpeg', qualidade).split(',')[1];
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** Busca a imagem pelo mesmo endereço protegido pelo código, não por link do Drive. */
+async function carregarFoto(id) {
+  if (fotosCarregadas.has(id)) return fotosCarregadas.get(id);
+  const r = await postar({ codigo: conf.codigo, acoes: [{ acao: 'foto', foto: id, ref: 0 }] });
+  const res = (r.resultados || [])[0];
+  if (!r.ok || !res || !res.ok) throw new Error((res && res.erro) || r.erro || 'erro');
+  const url = 'data:' + res.dados.mime + ';base64,' + res.dados.dados;
+  fotosCarregadas.set(id, url);
+  return url;
+}
+
+/** Preenche os espaços de foto que a tela acabou de desenhar. */
+function carregarFotosDaTela(el) {
+  el.querySelectorAll('[data-foto]').forEach(async vaga => {
+    const id = vaga.dataset.foto;
+    if (!id || vaga.dataset.pronta) return;
+    vaga.dataset.pronta = '1';
+    try {
+      const url = await carregarFoto(id);
+      vaga.innerHTML = `<img src="${url}" alt="Foto da tarefa"
+        style="width:100%;border-radius:14px;display:block">`;
+    } catch {
+      vaga.innerHTML = '<p class="muted xs">Não consegui carregar a foto.</p>';
+      delete vaga.dataset.pronta;
+    }
+  });
+}
+
+/**
+ * Marcar tarefa que pede foto.
+ *
+ * Fora da fila de propósito: guardar centenas de KB de imagem no armazenamento
+ * do navegador encheria o espaço e arriscaria perder tudo. Foto exige rede, e
+ * se não houver o app diz isso em vez de fingir que deu certo.
+ */
+async function marcarComFoto(botao, oc) {
+  const arquivo = await pedirFoto();
+  if (!arquivo) return;
+
+  let dados;
+  toast('Preparando a foto…');
+  try {
+    dados = await comprimir(arquivo);
+  } catch {
+    toast('Não consegui ler essa foto.');
+    return;
+  }
+
+  marcarLocal(oc);
+  repintarTarefa(botao, oc);
+  atualizarContagem();
+  atualizarDica();
+  toast('Enviando a foto…');
+
+  try {
+    const r = await postar({
+      codigo: conf.codigo,
+      acoes: [
+        { acao: 'enviarFoto', id: oc.id, dados, mime: 'image/jpeg', ref: 0 },
+        { acao: 'marcar', id: oc.id, ref: 1 },
+      ],
+    });
+    if (!r.ok) throw new Error(r.erro);
+    const ruim = (r.resultados || []).find(x => !x.ok);
+    if (ruim) throw new Error(ruim.erro);
+
+    est = r;
+    reaplicarFila();
+    guardarCacheDepois();
+    render();
+    toast('Foto enviada ✓');
+  } catch (e) {
+    // Desfaz: tarefa com foto sempre espera aprovação, então nada de pontos
+    // a devolver aqui.
+    oc.status = 'pendente';
+    repintarTarefa(botao, oc);
+    atualizarContagem();
+    atualizarDica();
+    const msg = e instanceof Error ? e.message : String(e);
+    toast(/precisa de foto|prazo|já está/.test(msg)
+      ? msg
+      : 'A foto precisa de internet. Tente de novo quando estiver conectada.');
+  }
+}
+
 // ------------------------------------------------------------- entrada
 function sair(msg) {
   conf = {};
@@ -639,6 +771,8 @@ function conteudoTarefa(o, atrasada) {
   const tags = [];
   if (o.pontos > 0) tags.push(`<span class="chip acc">+${o.pontos}</span>`);
   else tags.push('<span class="chip">dever</span>');
+  if (o.precisa_foto && !o.foto) tags.push('<span class="chip">📷 pede foto</span>');
+  if (o.foto) tags.push('<span class="chip ok">📷 foto enviada</span>');
   if (esperando) tags.push('<span class="chip warn">esperando confirmação</span>');
   if (recusada) tags.push('<span class="chip bad">recusada · pode marcar de novo</span>');
   if (atrasada && marcavelAgora(o)) tags.push('<span class="chip warn">atrasada</span>');
@@ -724,6 +858,12 @@ function telaHoje(el) {
     b.onclick = () => {
       const oc = est.ocorrencias.find(o => o.id === b.dataset.oc);
       if (!oc) return;
+
+      // Tarefa que pede foto e ainda não tem: abre a câmera antes de marcar.
+      if (marcavelAgora(oc) && oc.precisa_foto && !oc.foto) {
+        void marcarComFoto(b, oc);
+        return;
+      }
 
       // Nenhum dos dois sentidos pede confirmação: cada um desfaz o outro.
       const desfazendo = desmarcavelAgora(oc);
@@ -985,6 +1125,8 @@ function telaFila(el) {
             ${o.data !== est.hoje ? '<span class="chip warn">marcada em atraso</span>' : ''}
           </div></span>
       </div>
+      ${o.foto ? `<div data-foto="${esc(o.foto)}" style="margin-top:12px">
+        <p class="muted xs">Carregando a foto…</p></div>` : ''}
       <div class="bts" style="margin-top:12px">
         <button class="bt ok" data-oc-sim="${esc(o.id)}">Aprovar</button>
         <button class="bt ghost" data-oc-nao="${esc(o.id)}">Recusar</button>
@@ -1011,6 +1153,8 @@ function telaFila(el) {
       };
     });
   };
+  carregarFotosDaTela(el);
+
   decidir('data-oc-sim', 'decidir', true);
   decidir('data-oc-nao', 'decidir', false, 'Recusar? Ela poderá marcar de novo dentro do prazo.');
   decidir('data-rg-sim', 'decidirResgate', true);
@@ -1158,6 +1302,7 @@ function telaEditar(el) {
             <span class="chip">${esc(PERIODO_NOME[t.periodo] || t.periodo)}</span>
             <span class="chip">${esc(RECOR_NOME[t.recorrencia] || t.recorrencia)}</span>
             ${t.precisa_aprovacao ? '<span class="chip warn">precisa aprovar</span>' : ''}
+            ${t.precisa_foto ? '<span class="chip">📷 foto</span>' : ''}
             ${t.conta_mesada ? '' : '<span class="chip">fora da mesada</span>'}
             ${t.ativa ? '' : '<span class="chip bad">desativada</span>'}
           </div></span></div></button>`;
@@ -1245,6 +1390,8 @@ function formulario(el) {
     ${d.recorrencia === 'avulsa' ? campoTexto('dias', 'Data (AAAA-MM-DD)', d.dias, '2026-12-24') : ''}
     ${simNao('precisa_aprovacao', d.precisa_aprovacao, 'Precisa da sua aprovação',
       'Deixe "Não" no que você vê de qualquer jeito: senão você vira o gargalo.')}
+    ${simNao('precisa_foto', d.precisa_foto, 'Pede foto',
+      'Ela tira uma foto ao marcar. Resolve o "mas eu fiz!" quando você não está em casa. Já implica aprovação.')}
     ${simNao('conta_mesada', d.conta_mesada, 'Conta para a mesada',
       'Entra no percentual da semana e no streak.')}
     ${simNao('ativa', d.ativa, 'Ativa', 'Desativar para de gerar; o histórico fica.')}
@@ -1278,6 +1425,8 @@ function formulario(el) {
       lerCampos(el);
       const v = b.dataset.valor;
       d[b.dataset.campo] = v === 'sim' ? true : v === 'nao' ? false : v;
+      // Foto sem conferência não faz sentido: alguém tem de olhar a foto.
+      if (d.precisa_foto) d.precisa_aprovacao = true;
       render();
     };
   });

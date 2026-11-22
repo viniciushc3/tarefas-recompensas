@@ -340,3 +340,59 @@ test('a tela nunca anda para trás enquanto a planilha responde devagar', async 
   assert.equal(marcadas, 4, 'a planilha ficou com ' + marcadas);
   assert.deepEqual(erros, []);
 });
+
+test('ela fotografa a tarefa e a foto aparece na fila do pai', async (t) => {
+  const api = criarAmbiente();
+  api.instalar();
+  const cfg = api.config();
+  const servidor = await subirServidor(api);
+  const url = 'http://127.0.0.1:' + servidor.address().port;
+  const navegador = await chromium.launch();
+  t.after(async () => { await navegador.close(); servidor.close(); });
+
+  // PNG de 1x1: o bastante para o canvas abrir e recomprimir como JPEG.
+  const imagem = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64');
+
+  const dela = await navegador.newContext({ viewport: { width: 390, height: 844 } });
+  const pDela = await dela.newPage();
+  pDela.on('filechooser', async escolha => {
+    await escolha.setFiles({ name: 'quarto.png', mimeType: 'image/png', buffer: imagem });
+  });
+  const erros = await abrir(pDela, url, cfg.codigoFilha);
+
+  const comFoto = pDela.locator('.tarefa:not([disabled])', { hasText: 'Organizar o quarto' }).first();
+  assert.equal(await comFoto.count(), 1, 'a tarefa com foto não apareceu (é de fim de semana)');
+  assert.match(await comFoto.textContent(), /pede foto/,
+    'ela precisa saber que essa tarefa pede foto antes de tocar');
+
+  await comFoto.click();
+  await pDela.waitForFunction(
+    () => document.querySelector('#v-hoje').textContent.includes('foto enviada'),
+    null, { timeout: 20000 });
+
+  // chegou na planilha
+  const oc = api.ler('Ocorrencias').find(o => o.titulo === 'Organizar o quarto');
+  assert.ok(oc.foto, 'a planilha ficou sem a referência da foto');
+  assert.equal(oc.status, 'marcada');
+  assert.equal(api._ambiente.DriveApp._arquivos.size, 1, 'o arquivo não foi para o Drive');
+
+  // ---------- e aparece na fila do pai
+  const seu = await navegador.newContext({ viewport: { width: 390, height: 844 } });
+  const pSeu = await seu.newPage();
+  const errosSeus = await abrir(pSeu, url, cfg.codigoPai);
+
+  await pSeu.waitForSelector('#v-fila img', { timeout: 20000 });
+  const origem = await pSeu.getAttribute('#v-fila img', 'src');
+  assert.match(origem, /^data:image\//, 'a imagem não veio pelo endereço protegido');
+  assert.ok(origem.length > 100, 'imagem vazia');
+
+  // a largura renderizada prova que o navegador decodificou de verdade
+  const largura = await pSeu.evaluate(
+    () => document.querySelector('#v-fila img').naturalWidth);
+  assert.ok(largura > 0, 'a imagem não decodificou');
+
+  assert.deepEqual(erros, [], 'erro de JS na tela dela');
+  assert.deepEqual(errosSeus, [], 'erro de JS na sua tela');
+});

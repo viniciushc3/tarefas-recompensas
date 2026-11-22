@@ -140,6 +140,23 @@ Erro de regra do servidor descarta o item da fila — insistir não ajudaria. Er
 de rede mantém, e uma ação feita durante um envio dispara outro envio assim que
 o primeiro termina.
 
+## Fotos
+
+Tarefa com `precisa_foto` abre a câmera ao ser marcada e sempre vai para a fila
+de aprovação — foto que ninguém olha não serve para nada.
+
+A imagem é reduzida no celular (1200px, qualidade 65%) antes de subir: foto de
+celular tem de 3 a 8 MB, e isso é a diferença entre esperar dois segundos e
+esperar meio minuto no 4G.
+
+Fica no Drive **sem compartilhamento**. O app busca a imagem pelo próprio
+script, protegido pelo código, e o script confere que o arquivo pedido pertence
+a uma ocorrência desta planilha. Sem essa conferência, quem tivesse um código
+poderia ler qualquer arquivo do Drive de quem publicou — o script roda como
+essa pessoa.
+
+Desmarcar guarda a foto: remarcar a mesma tarefa no mesmo dia não pede outra.
+
 ## Arredondamento
 
 A divisão do cofrinho arredonda **a favor dela**: 25 pontos viram 18 gastáveis e

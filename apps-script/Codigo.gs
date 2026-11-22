@@ -15,9 +15,11 @@
 var ABAS = {
   Config:      ['chave', 'valor'],
   Tarefas:     ['id', 'titulo', 'icone', 'tipo', 'pontos', 'periodo', 'recorrencia',
-                'dias', 'precisa_aprovacao', 'conta_mesada', 'ativa', 'criada_em'],
+                'dias', 'precisa_aprovacao', 'precisa_foto', 'conta_mesada', 'ativa',
+                'criada_em'],
   Ocorrencias: ['id', 'data', 'tarefa_id', 'titulo', 'icone', 'pontos', 'tipo', 'periodo',
-                'conta_mesada', 'precisa_aprovacao', 'status', 'marcada_em', 'decidida_em'],
+                'conta_mesada', 'precisa_aprovacao', 'precisa_foto', 'foto',
+                'status', 'marcada_em', 'decidida_em'],
   Extrato:     ['id', 'quando', 'tipo', 'gastavel', 'cofrinho', 'motivo', 'ref'],
   Recompensas: ['id', 'titulo', 'icone', 'tipo', 'bolso', 'custo', 'minutos', 'ativa'],
   Resgates:    ['id', 'quando', 'recompensa_id', 'titulo', 'custo', 'bolso', 'minutos',
@@ -411,6 +413,11 @@ function normalizar(cfg) {
     if (falta('periodo'))           novos.periodo = 'qualquer';
     if (falta('recorrencia'))       novos.recorrencia = 'diaria';
     if (falta('precisa_aprovacao')) novos.precisa_aprovacao = 'nao';
+    // Foto sem conferência não faz sentido: alguém tem de olhar a foto.
+    if (falta('precisa_foto'))      novos.precisa_foto = 'nao';
+    if (booleano(t.precisa_foto) || novos.precisa_foto === 'sim') {
+      if (!booleano(t.precisa_aprovacao)) novos.precisa_aprovacao = 'sim';
+    }
     // Em branco significaria "não conta para a mesada", que não é o que
     // alguém quer dizer ao deixar a célula vazia.
     if (falta('conta_mesada'))      novos.conta_mesada = 'sim';
@@ -479,6 +486,8 @@ function garantirDias(cfg, diasParaTras) {
         pontos: Number(t.pontos) || 0, tipo: t.tipo, periodo: t.periodo || 'qualquer',
         conta_mesada: booleano(t.conta_mesada) ? 'sim' : 'nao',
         precisa_aprovacao: booleano(t.precisa_aprovacao) ? 'sim' : 'nao',
+        precisa_foto: booleano(t.precisa_foto) ? 'sim' : 'nao',
+        foto: '',
         status: 'pendente', marcada_em: '', decidida_em: ''
       });
       existentes[t.id + '|' + dia] = true;
@@ -563,6 +572,9 @@ function montarEstado(pessoa, cfg) {
       periodo: o.periodo || 'qualquer',
       conta_mesada: booleano(o.conta_mesada),
       precisa_aprovacao: booleano(o.precisa_aprovacao),
+      precisa_foto: booleano(o.precisa_foto),
+      // só o identificador; a imagem é buscada quando alguém vai olhar
+      foto: String(o.foto || ''),
       status: o.status,
       // a tela da fila usa isto para mostrar o que ela fez por trás de um resgate
       decidida_em: String(o.decidida_em || '')
@@ -631,6 +643,7 @@ function montarEstado(pessoa, cfg) {
         pontos: Number(t.pontos) || 0, periodo: t.periodo || 'qualquer',
         recorrencia: t.recorrencia || 'diaria', dias: String(t.dias || ''),
         precisa_aprovacao: booleano(t.precisa_aprovacao),
+        precisa_foto: booleano(t.precisa_foto),
         conta_mesada: booleano(t.conta_mesada),
         ativa: booleano(t.ativa)
       };
@@ -695,6 +708,10 @@ function acaoMarcar(pessoa, cfg, dados) {
   var data = String(oc.data);
   if (data > hoje) throw new Error('ainda não é o dia dessa tarefa');
   if (data < somarDias(hoje, -cfg.janelaAtraso)) throw new Error('passou do prazo para marcar');
+
+  if (booleano(oc.precisa_foto) && !String(oc.foto || '').trim()) {
+    throw new Error('essa tarefa precisa de foto');
+  }
 
   var novo = booleano(oc.precisa_aprovacao) ? 'marcada' : 'aprovada';
   escreverLinha('Ocorrencias', oc, {
@@ -889,6 +906,64 @@ function acaoPagarSemana(pessoa, cfg, dados) {
   return { ok: true };
 }
 
+// ------------------------------------------------------------- fotos
+/**
+ * Pasta das fotos, no Drive de quem publicou o script.
+ *
+ * Fica SEM compartilhamento. O app não usa a URL do Drive: pede a imagem a
+ * este mesmo script, que só responde a quem tem código. São fotos do quarto
+ * de uma criança — link público, ainda que impossível de adivinhar, não é
+ * coisa que eu queira criar sem você pedir.
+ */
+function pastaDasFotos() {
+  var id = lerConfig('pasta_fotos');
+  if (id) {
+    try { return DriveApp.getFolderById(id); } catch (e) { /* apagada: cria outra */ }
+  }
+  var pasta = DriveApp.createFolder('Tarefas e Recompensas — fotos');
+  gravarConfig('pasta_fotos', pasta.getId());
+  return pasta;
+}
+
+function acaoEnviarFoto(pessoa, cfg, dados) {
+  var oc = ler('Ocorrencias').filter(function (o) { return o.id === dados.id; })[0];
+  if (!oc) throw new Error('tarefa não encontrada');
+
+  var base64 = String(dados.dados || '');
+  if (!base64) throw new Error('foto vazia');
+  // ~4/3 do tamanho do arquivo. 8 MB de base64 já é foto grande demais.
+  if (base64.length > 8000000) throw new Error('foto grande demais');
+
+  var mime = dados.mime === 'image/png' ? 'image/png' : 'image/jpeg';
+  var blob = Utilities.newBlob(Utilities.base64Decode(base64), mime,
+    'tarefa-' + oc.id + (mime === 'image/png' ? '.png' : '.jpg'));
+
+  var arquivo = pastaDasFotos().createFile(blob);
+  escreverLinha('Ocorrencias', oc, { foto: arquivo.getId() });
+  return { foto: arquivo.getId() };
+}
+
+/**
+ * Devolve a imagem em base64.
+ *
+ * A conferência de que o identificador pertence a uma ocorrência desta
+ * planilha não é burocracia: sem ela, quem tivesse um código poderia pedir
+ * QUALQUER arquivo do seu Drive, já que o script roda como você.
+ */
+function acaoFoto(pessoa, cfg, dados) {
+  var id = String(dados.foto || '').trim();
+  if (!id) throw new Error('foto não informada');
+
+  var nossa = ler('Ocorrencias').some(function (o) { return String(o.foto || '') === id; });
+  if (!nossa) throw new Error('foto não encontrada');
+
+  var blob = DriveApp.getFileById(id).getBlob();
+  return {
+    mime: blob.getContentType(),
+    dados: Utilities.base64Encode(blob.getBytes())
+  };
+}
+
 // ------------------------------------------------- editar pelo app
 var PERIODOS_VALIDOS = ['manha', 'tarde', 'noite', 'qualquer'];
 var RECORRENCIAS_VALIDAS = ['diaria', 'semana', 'fimdesemana', 'dias', 'avulsa'];
@@ -923,7 +998,9 @@ function acaoSalvarTarefa(pessoa, cfg, dados) {
     periodo: periodo,
     recorrencia: recorrencia,
     dias: dias,
-    precisa_aprovacao: simNao(t.precisa_aprovacao),
+    // Foto implica aprovação: alguém tem de olhar a foto.
+    precisa_aprovacao: simNao(t.precisa_aprovacao || t.precisa_foto),
+    precisa_foto: simNao(t.precisa_foto),
     conta_mesada: simNao(t.conta_mesada !== false),
     ativa: simNao(t.ativa !== false)
   };
@@ -988,6 +1065,8 @@ function acaoSalvarRecompensa(pessoa, cfg, dados) {
 var ACOES = {
   marcar: acaoMarcar,
   desmarcar: acaoDesmarcar,
+  enviarFoto: acaoEnviarFoto,
+  foto: acaoFoto,
   salvarTarefa: acaoSalvarTarefa,
   salvarRecompensa: acaoSalvarRecompensa,
   decidir: acaoDecidir,
@@ -1211,19 +1290,21 @@ function semearTarefas() {
 
   // EXTRAS: pagam pontos. Calibradas para ~90-105 pontos num dia útil, ou seja
   // ~63-74 gastáveis -> 32 a 37 min de tela, dentro do teto de 40.
+  // o último campo é a foto: resolve o "mas eu fiz!" quando você não está em casa
   var extras = [
-    ['Pôr a mesa', '🍽️', 20, 'noite', 'diaria', '', 'nao'],
-    ['Tirar a mesa', '🧽', 20, 'noite', 'diaria', '', 'nao'],
-    ['Tirar o lixo', '🗑️', 20, 'noite', 'diaria', '', 'nao'],
-    ['Lavar a louça', '🫧', 30, 'noite', 'diaria', '', 'sim'],
-    ['Regar as plantas', '🪴', 15, 'manha', 'dias', '1,3,5', 'nao'],
-    ['Organizar o quarto', '🧹', 40, 'qualquer', 'fimdesemana', '', 'sim']
+    ['Pôr a mesa', '🍽️', 20, 'noite', 'diaria', '', 'nao', 'nao'],
+    ['Tirar a mesa', '🧽', 20, 'noite', 'diaria', '', 'nao', 'nao'],
+    ['Tirar o lixo', '🗑️', 20, 'noite', 'diaria', '', 'nao', 'nao'],
+    ['Lavar a louça', '🫧', 30, 'noite', 'diaria', '', 'sim', 'nao'],
+    ['Regar as plantas', '🪴', 15, 'manha', 'dias', '1,3,5', 'nao', 'nao'],
+    ['Organizar o quarto', '🧹', 40, 'qualquer', 'fimdesemana', '', 'sim', 'sim']
   ];
   extras.forEach(function (t) {
     anexar('Tarefas', {
       id: novoId('tf'), titulo: t[0], icone: t[1], tipo: 'extra', pontos: t[2],
       periodo: t[3], recorrencia: t[4], dias: t[5],
-      precisa_aprovacao: t[6], conta_mesada: 'sim', ativa: 'sim', criada_em: hoje
+      precisa_aprovacao: t[6], precisa_foto: t[7],
+      conta_mesada: 'sim', ativa: 'sim', criada_em: hoje
     });
   });
 }
@@ -1264,6 +1345,7 @@ function listasSuspensas(existentes) {
       periodo: ['manha', 'tarde', 'noite', 'qualquer'],
       recorrencia: ['diaria', 'semana', 'fimdesemana', 'dias', 'avulsa'],
       precisa_aprovacao: ['sim', 'nao'],
+      precisa_foto: ['sim', 'nao'],
       conta_mesada: ['sim', 'nao'],
       ativa: ['sim', 'nao']
     },

@@ -138,6 +138,13 @@ function criarAmbiente({ fuso = 'America/Sao_Paulo' } = {}) {
       },
     },
     Utilities: {
+      base64Decode: txt => Buffer.from(txt, 'base64'),
+      base64Encode: bytes => Buffer.from(bytes).toString('base64'),
+      newBlob: (bytes, mime, nome) => ({
+        getBytes: () => bytes,
+        getContentType: () => mime,
+        getName: () => nome,
+      }),
       formatDate(d, tz, fmt) {
         const p = partes(d, tz);
         const data = `${p.year}-${p.month}-${p.day}`;
@@ -145,6 +152,28 @@ function criarAmbiente({ fuso = 'America/Sao_Paulo' } = {}) {
       },
     },
     LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) },
+    DriveApp: (() => {
+      const arquivos = new Map();
+      let seq = 0;
+      const pasta = {
+        getId: () => 'pasta-falsa',
+        createFile(blob) {
+          const id = 'arq-' + (++seq);
+          arquivos.set(id, blob);
+          return { getId: () => id, getBlob: () => blob };
+        },
+      };
+      return {
+        _arquivos: arquivos,
+        createFolder: () => pasta,
+        getFolderById: id => { if (id === 'pasta-falsa') return pasta; throw new Error('sem pasta'); },
+        getFileById(id) {
+          const b = arquivos.get(id);
+          if (!b) throw new Error('arquivo não encontrado: ' + id);
+          return { getId: () => id, getBlob: () => b };
+        },
+      };
+    })(),
     ContentService: {
       MimeType: { JSON: 'json' },
       createTextOutput: t => ({ _texto: t, setMimeType() { return this; }, getContent() { return this._texto; } }),

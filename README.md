@@ -7,7 +7,7 @@ confere no seu, e as tarefas viram pontos, cofrinho e mesada.
 Sem app para instalar, sem loja, sem servidor. A planilha é o banco de dados
 **e** o seu painel de administração.
 
-- **Como testar:** `./scripts/testar.sh` (81 testes, sem Google e sem rede)
+- **Como testar:** `./scripts/testar.sh` (89 testes, sem Google e sem rede)
 - **As decisões de desenho:** [`docs/regras.md`](docs/regras.md)
 
 ## As três moedas
@@ -94,6 +94,7 @@ grafia.
 | `recorrencia` | `diaria`, `semana` (seg–sex), `fimdesemana`, `dias`, `avulsa` | `diaria` |
 | `dias` | com `dias`: `1,3,5` (0=dom). Com `avulsa`: a data, `2026-12-24` | vazio |
 | `precisa_aprovacao` | `sim` manda para a sua fila; `nao` credita na hora | `nao` |
+| `precisa_foto` | ela fotografa ao marcar; implica aprovação | `nao` |
 | `conta_mesada` | entra no percentual da semana e no streak | `sim` |
 | `ativa` | `nao` para de gerar; o histórico fica | `sim` |
 | `id`, `criada_em` | o script preenche | — |
@@ -131,6 +132,22 @@ mostra quanto o catálogo está liberando.
 Com o conteúdo inicial: dia útil completo dá 90 a 105 pontos, ou seja 63 a 74
 gastáveis — 32 a 37 minutos de tela, dentro de um teto de 40. O cofrinho junta
 uns 28 por dia, e a meta de 4.000 leva uns 4 meses e meio.
+
+## Fotos
+
+Uma tarefa pode pedir foto (`precisa_foto`, ou o controle "Pede foto" na aba
+Editar). Ao marcar, abre a câmera; a imagem é reduzida a 1200px e vai para uma
+pasta no Drive de quem publicou o script. Na sua fila ela aparece acima dos
+botões de aprovar.
+
+**A pasta fica sem compartilhamento.** O app não usa link do Drive: pede a
+imagem ao próprio script, que só responde a quem tem código, e o script confere
+que o arquivo pedido pertence mesmo a uma ocorrência desta planilha — sem essa
+conferência, um código daria acesso a qualquer arquivo do seu Drive.
+
+A imagem não viaja junto com o estado; é buscada só quando alguém vai olhar.
+E foto exige internet: se não houver, o app diz isso em vez de fingir que
+marcou.
 
 ## O que o app não faz
 
