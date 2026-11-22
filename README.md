@@ -7,7 +7,7 @@ confere no seu, e as tarefas viram pontos, cofrinho e mesada.
 Sem app para instalar, sem loja, sem servidor. A planilha é o banco de dados
 **e** o seu painel de administração.
 
-- **Como testar:** `./scripts/testar.sh` (107 testes, sem Google e sem rede)
+- **Como testar:** `./scripts/testar.sh` (111 testes, sem Google e sem rede)
 - **As decisões de desenho:** [`docs/regras.md`](docs/regras.md)
 
 ## As três moedas
@@ -169,6 +169,19 @@ Por isso ela não some. O que some é o trabalho de digitar:
   `…/#c=senha`. Mande para o celular dela uma vez; ela abre e nunca mais
   digita nada. O link público continua pedindo senha, e a senha some da barra
   de endereço assim que é guardada
+
+## Quando algo parecer estranho
+
+Abra o site com `#debug` no fim do endereço:
+
+```
+https://viniciushc3.github.io/tarefas-recompensas/#debug
+```
+
+Aparece uma faixa preta no rodapé registrando cada conversa com a planilha:
+quanto demorou e **exatamente** quais tarefas mudaram de estado. Linha em
+vermelho é tarefa que voltou para pendente — o sintoma de a tela andar para
+trás. Serve para responder com dado em vez de impressão.
 
 ## O que o app não faz
 

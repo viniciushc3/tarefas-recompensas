@@ -27,8 +27,11 @@ function subirServidor(api, atraso) {
         };
         // O Apps Script leva de meio a dois segundos. Simular isso é o que faz
         // aparecer o problema de resposta velha chegando em cima do que ela
-        // acabou de marcar.
-        if (atraso && atraso.ms) setTimeout(responder, atraso.ms); else responder();
+        // acabou de marcar. Enviar foto demora mais que uma sincronização
+        // comum — é justamente nessa diferença que o problema mora.
+        const comFoto = corpo.indexOf('enviarFoto') >= 0;
+        const espera = atraso && (comFoto ? atraso.msFoto || atraso.ms : atraso.ms);
+        if (espera) setTimeout(responder, espera); else responder();
       });
       return;
     }
@@ -558,4 +561,188 @@ test('ela escolhe o tema escuro e ele fica guardado', async (t) => {
   await p.waitForSelector('nav button', { state: 'visible', timeout: 15000 });
   assert.equal(await p.getAttribute('body', 'data-tema'), 'escuro', 'esqueceu o tema');
   assert.deepEqual(erros, []);
+});
+
+test('a lista não é reconstruída quando a planilha responde', async (t) => {
+  // "Clica, aceita, passa uns segundos a tarefa volta, aí some de novo":
+  // reconstruir a lista inteira recria todos os cartões de uma vez, e num
+  // celular isso pisca logo depois do toque.
+  const api = criarAmbiente();
+  api.instalar();
+  const cfg = api.config();
+  const atraso = { ms: 0 };
+  const servidor = await subirServidor(api, atraso);
+  const url = 'http://127.0.0.1:' + servidor.address().port;
+  const navegador = await chromium.launch();
+  t.after(async () => { await navegador.close(); servidor.close(); });
+
+  const ctx = await navegador.newContext({ viewport: { width: 390, height: 844 } });
+  const p = await ctx.newPage();
+  const erros = await abrir(p, url, cfg.codigoFilha);
+  atraso.ms = 1200;
+
+  // Carimba cada cartão. Se o navegador recriar a lista, os carimbos somem.
+  const quantos = await p.evaluate(() => {
+    const nos = document.querySelectorAll('#v-hoje .tarefa');
+    nos.forEach((n, i) => { n.dataset.carimbo = 'c' + i; });
+    return nos.length;
+  });
+  assert.ok(quantos > 2);
+
+  await p.locator('#v-hoje .tarefa:not([disabled])').first().click();
+  await p.waitForSelector('#v-hoje .tarefa.feita, #v-hoje .tarefa.esperando', { timeout: 5000 });
+
+  await p.waitForFunction(
+    () => document.body.dataset.sync === 'ok' && !window.__filaPendente,
+    null, { timeout: 30000 });
+  await p.waitForTimeout(600);
+
+  const sobreviveram = await p.evaluate(
+    () => document.querySelectorAll('#v-hoje .tarefa[data-carimbo]').length);
+  assert.equal(sobreviveram, quantos,
+    'a lista foi reconstruída: ' + (quantos - sobreviveram) + ' cartões recriados');
+
+  // E o estado final está certo.
+  assert.equal(await p.locator('#v-hoje .tarefa.feita, #v-hoje .tarefa.esperando').count(), 1);
+  assert.deepEqual(erros, []);
+});
+
+test('completar o dia não reconstrói a lista, mesmo mudando o streak', async (t) => {
+  // O streak vem do servidor e muda quando ela fecha o dia. Era mais um
+  // motivo para a tela inteira ser redesenhada depois do último toque.
+  const api = criarAmbiente();
+  api.instalar();
+  const cfg = api.config();
+  const servidor = await subirServidor(api);
+  const url = 'http://127.0.0.1:' + servidor.address().port;
+  const navegador = await chromium.launch();
+  t.after(async () => { await navegador.close(); servidor.close(); });
+
+  const ctx = await navegador.newContext({ viewport: { width: 390, height: 844 } });
+  const p = await ctx.newPage();
+  await abrir(p, url, cfg.codigoFilha);
+
+  // marca tudo que não precisa de foto
+  for (let i = 0; i < 12; i++) {
+    const alvo = p.locator('#v-hoje .tarefa:not(.feita):not(.esperando):not([disabled])')
+      .filter({ hasNotText: 'pede foto' }).first();
+    if (!(await alvo.count())) break;
+    await alvo.click();
+    await p.waitForTimeout(120);
+  }
+  await p.waitForFunction(
+    () => document.body.dataset.sync === 'ok' && !window.__filaPendente,
+    null, { timeout: 30000 });
+
+  const quantos = await p.evaluate(() => {
+    const nos = document.querySelectorAll('#v-hoje .tarefa');
+    nos.forEach((n, i) => { n.dataset.carimbo = 'c' + i; });
+    return nos.length;
+  });
+
+  // força uma sincronização e confere que nada foi recriado
+  await p.evaluate(() => sincronizar());
+  await p.waitForTimeout(1200);
+  assert.equal(
+    await p.evaluate(() => document.querySelectorAll('#v-hoje .tarefa[data-carimbo]').length),
+    quantos, 'sincronizar reconstruiu a lista');
+});
+
+test('sincronização no meio do envio da foto não desmarca a tarefa', async (t) => {
+  // O relato: "clica, ele aceita, passa uns segundos a tarefa volta, aí some
+  // de novo". A foto sobe FORA da fila (imagem não cabe no armazenamento do
+  // navegador), então uma resposta de fundo chegando no meio do envio trazia
+  // a tarefa pendente e apagava a marcação — e ela voltava quando o envio
+  // terminava.
+  const api = criarAmbiente();
+  api.instalar();
+  const cfg = api.config();
+  const atraso = { ms: 0 };
+  const servidor = await subirServidor(api, atraso);
+  const url = 'http://127.0.0.1:' + servidor.address().port;
+  const navegador = await chromium.launch();
+  t.after(async () => { await navegador.close(); servidor.close(); });
+
+  const imagem = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64');
+
+  const ctx = await navegador.newContext({ viewport: { width: 390, height: 844 } });
+  const p = await ctx.newPage();
+  p.on('filechooser', async e => {
+    await e.setFiles({ name: 'q.png', mimeType: 'image/png', buffer: imagem });
+  });
+  const erros = await abrir(p, url, cfg.codigoFilha);
+
+  // A sincronização responde em 600ms; a foto, em 4s. A resposta curta chega
+  // no meio do envio — exatamente o caso real.
+  atraso.ms = 600;
+  atraso.msFoto = 4000;
+  await p.locator('.tarefa:not([disabled])', { hasText: 'Organizar o quarto' }).first().click();
+  await p.waitForSelector('.tarefa.esperando', { timeout: 15000 });
+
+  // Vigia a tela e força uma sincronização de fundo no meio do envio.
+  await p.evaluate(() => {
+    window.__min = 99;
+    window.__vigia = setInterval(() => {
+      const n = document.querySelectorAll('.tarefa.feita, .tarefa.esperando').length;
+      if (n < window.__min) window.__min = n;
+    }, 25);
+    sincronizar();
+  });
+
+  await p.waitForFunction(
+    () => document.querySelector('#v-hoje').textContent.includes('foto enviada'),
+    null, { timeout: 30000 });
+  const minimo = await p.evaluate(() => { clearInterval(window.__vigia); return window.__min; });
+
+  assert.equal(minimo, 1,
+    'a tarefa desmarcou sozinha durante o envio da foto (mínimo visto: ' + minimo + ')');
+  assert.ok(api.ler('Ocorrencias').find(o => o.titulo === 'Organizar o quarto').foto,
+    'a foto não chegou na planilha');
+  assert.deepEqual(erros, []);
+});
+
+test('o modo diagnóstico registra cada conversa com a planilha', async (t) => {
+  const api = criarAmbiente();
+  api.instalar();
+  const cfg = api.config();
+  const servidor = await subirServidor(api);
+  const url = 'http://127.0.0.1:' + servidor.address().port;
+  const navegador = await chromium.launch();
+  t.after(async () => { await navegador.close(); servidor.close(); });
+
+  const ctx = await navegador.newContext({ viewport: { width: 390, height: 844 } });
+  const p = await ctx.newPage();
+  await p.addInitScript(u => {
+    let a = {};
+    try { a = JSON.parse(localStorage.getItem('tr.conf') || '{}'); } catch {}
+    a.url = u; a.codigo = 'SERA_TROCADO';
+    localStorage.setItem('tr.conf', JSON.stringify(a));
+  }, url + '/api');
+
+  await p.goto(url + '/#c=' + cfg.codigoFilha + '&debug', { waitUntil: 'domcontentloaded' });
+  await p.waitForSelector('nav button', { state: 'visible', timeout: 15000 });
+  assert.ok(await p.locator('#registro').isVisible(), 'o registro não apareceu');
+
+  await p.locator('.tarefa:not([disabled])').first().click();
+  // Espera o envio DA MARCAÇÃO: a sincronização de abertura já tinha escrito
+  // uma resposta antes do toque.
+  await p.waitForFunction(
+    () => document.getElementById('registro').textContent.includes('envia 1 ação'),
+    null, { timeout: 20000 });
+  await p.waitForFunction(
+    () => document.body.dataset.sync === 'ok' && !window.__filaPendente,
+    null, { timeout: 20000 });
+
+  const registro = await p.textContent('#registro');
+  assert.match(registro, /marca /, 'não registrou o toque');
+  assert.match(registro, /envia 1 ação/, 'não registrou o envio');
+  assert.match(registro, /resposta em \d+ms/, 'não registrou a resposta');
+
+  // Sem #debug, nada aparece.
+  const p2 = await ctx.newPage();
+  await p2.goto(url, { waitUntil: 'domcontentloaded' });
+  await p2.waitForSelector('nav button', { state: 'visible', timeout: 15000 });
+  assert.ok(!(await p2.locator('#registro').isVisible()));
 });

@@ -233,6 +233,13 @@ label{display:block;font-size:.72rem;font-weight:800;letter-spacing:.06em;text-t
 .tira .num{font-size:.66rem;color:var(--muted)}
 .tira .hoje .rot{color:var(--text);font-weight:800}
 
+#registro{position:fixed;left:0;right:0;bottom:0;max-height:42vh;overflow:auto;z-index:30;
+  background:rgba(0,0,0,.88);color:#b9f6c4;font:11px/1.35 ui-monospace,Menlo,Consolas,monospace;
+  padding:8px 10px 14px;white-space:pre-wrap;display:none}
+body.depurando #registro{display:block}
+#registro b{color:#ffd27a}
+#registro .ruim{color:#ff9aa8}
+
 #toast{position:fixed;left:50%;bottom:92px;transform:translateX(-50%) translateY(20px);
   background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:11px 16px;
   font-size:.88rem;font-weight:600;z-index:20;opacity:0;pointer-events:none;
@@ -292,6 +299,7 @@ body.sem-codigo header,body.sem-codigo main,body.sem-codigo nav{display:none}
 
 <nav id="nav"></nav>
 <div id="toast"></div>
+<div id="registro"></div>
 
 <script>
 'use strict';
@@ -302,6 +310,47 @@ body.sem-codigo header,body.sem-codigo main,body.sem-codigo nav{display:none}
 // Google, então a URL precisa estar aqui. A barreira é o código de acesso, que
 // o script confere. Para trocar, publique uma implantação nova e mude aqui.
 const API_URL = 'https://script.google.com/macros/s/AKfycbxthDH9XQAmqyW8q2LZpGBn4STfP5MeeodxKG_TjtVCjHlDU5d4z-vyWTe5orMjlp9FJQ/exec';
+
+/**
+ * Modo diagnóstico: abra o site com #debug no fim do endereço.
+ *
+ * Mostra na tela, em tempo real, cada conversa com a planilha: quanto demorou
+ * e exatamente quais tarefas mudaram de estado. É para responder "a tarefa
+ * voltou sozinha?" com dado em vez de impressão.
+ */
+const DEPURANDO = location.hash.indexOf('debug') >= 0;
+
+function anotar(texto, ruim) {
+  if (!DEPURANDO) return;
+  const el = document.getElementById('registro');
+  if (!el) return;
+  const hora = new Date().toLocaleTimeString('pt-BR', { hour12: false }) +
+    '.' + String(new Date().getMilliseconds()).padStart(3, '0');
+  const linha = document.createElement('div');
+  if (ruim) linha.className = 'ruim';
+  linha.textContent = hora + '  ' + texto;
+  el.appendChild(linha);
+  el.scrollTop = el.scrollHeight;
+  while (el.childNodes.length > 200) el.removeChild(el.firstChild);
+}
+
+/** Estado de cada tarefa de hoje, para comparar antes e depois. */
+function fotografiaDoDia() {
+  if (!est || !est.ocorrencias) return {};
+  const m = {};
+  est.ocorrencias.forEach(o => { if (o.data === est.hoje) m[o.titulo] = o.status; });
+  return m;
+}
+
+function diferenca(antes, depois) {
+  const mudou = [];
+  Object.keys(depois).forEach(t => {
+    if (antes[t] !== undefined && antes[t] !== depois[t]) {
+      mudou.push(t + ': ' + antes[t] + ' -> ' + depois[t]);
+    }
+  });
+  return mudou;
+}
 
 // ------------------------------------------------------------- utilidades
 const $ = s => document.querySelector(s);
@@ -418,7 +467,7 @@ async function postar(corpo) {
   return r.json();
 }
 
-let sincronizando = false, timerSync = null, pedidoDuranteEnvio = false;
+let sincronizando = false, timerSync = null, pedidoDuranteEnvio = false, falhasSeguidas = 0;
 
 /**
  * Resumo do que está desenhado na tela.
@@ -431,12 +480,26 @@ function assinaturaVisivel() {
   if (!est) return '';
   return [
     est.saldo.gastavel, est.saldo.cofrinho, est.streak,
-    est.ocorrencias.map(o => o.id + o.status).join(','),
+    // a foto entra no resumo: sem ela, enviar uma foto não mudava nada
+    // visível para o código, e o selo "foto enviada" nunca aparecia
+    est.ocorrencias.map(o => o.id + o.status + (o.foto ? '+f' : '') +
+      (o.precisa_foto ? '+p' : '')).join(','),
     (est.resgates || []).map(r => r.id + r.status).join(','),
     (est.tarefas || []).map(t => t.id + t.titulo + t.pontos + t.ativa).join(','),
     (est.catalogo || []).map(r => r.id + r.titulo + r.custo + r.ativa).join(','),
   ].join('|');
 }
+
+/**
+ * Ações em curso que NÃO estão na fila.
+ *
+ * O envio de foto não cabe na fila: a imagem tem centenas de KB e encheria o
+ * armazenamento do navegador. Mas enquanto ela sobe, uma sincronização de
+ * fundo pode responder com a tarefa ainda pendente e apagar a marcação da
+ * tela — e quando o envio termina, ela volta. Era o "aceita, volta, some de
+ * novo".
+ */
+const emAndamento = new Map();
 
 /**
  * Reaplica na resposta nova o que ainda não chegou ao servidor.
@@ -458,6 +521,13 @@ function reaplicarFila() {
       const r = (est.recompensas || []).find(x => x.id === a.id);
       if (r) pedirLocal(r);
     }
+  });
+
+  emAndamento.forEach((acao, id) => {
+    const o = est.ocorrencias.find(x => x.id === id);
+    if (!o) return;
+    if (acao === 'marcar' && marcavelAgora(o)) marcarLocal(o);
+    if (acao === 'desmarcar' && desmarcavelAgora(o)) desmarcarLocal(o);
   });
 }
 
@@ -491,6 +561,10 @@ async function sincronizar() {
   sincronizando = true;
   mostrarStatus();
   const enviadas = fila.slice();
+  const comecou = Date.now();
+  const antesDoDia = fotografiaDoDia();
+  anotar('envia ' + enviadas.length + ' ação(ões): ' +
+    (enviadas.map(a => a.acao).join(', ') || 'nenhuma'));
   try {
     const r = await postar({
       codigo: conf.codigo,
@@ -519,20 +593,35 @@ async function sincronizar() {
     est = r;
     reaplicarFila();
     guardarCacheDepois();
+
+    const mudou = diferenca(antesDoDia, fotografiaDoDia());
+    anotar('resposta em ' + (Date.now() - comecou) + 'ms' +
+      (mudou.length ? ' · MUDOU ' + mudou.join(' | ') : ' · nada mudou'),
+      mudou.some(m => / -> pendente$/.test(m)));
+
     // Só redesenha se algo mudou de verdade. Quase sempre o servidor apenas
     // confirma o que ela já viu acontecer, e redesenhar à toa é o que fazia a
     // tela "mexer sozinha" depois do toque.
     if (assinaturaVisivel() !== antes) render();
-  } catch {
+    falhasSeguidas = 0;
+  } catch (e) {
     // Sem rede: a fila fica guardada e vai na próxima. Nada a dizer na tela.
+    falhasSeguidas++;
+    anotar('falhou em ' + (Date.now() - comecou) + 'ms: ' +
+      (e && e.message ? e.message : e), true);
   }
   sincronizando = false;
   mostrarStatus();
 
   if (pedidoDuranteEnvio || fila.length) {
     pedidoDuranteEnvio = false;
+    // Espera crescente quando a rede falha. Sem isto, uma rede caída vira um
+    // pedido a cada 400ms, consumindo bateria e a cota diária do Apps Script.
+    const espera = falhasSeguidas
+      ? Math.min(30000, 800 * Math.pow(2, falhasSeguidas - 1))
+      : 400;
     clearTimeout(timerSync);
-    timerSync = setTimeout(sincronizar, 400);
+    timerSync = setTimeout(sincronizar, espera);
   }
 }
 
@@ -687,6 +776,7 @@ async function marcarComFoto(botao, oc) {
   }
 
   marcarLocal(oc);
+  emAndamento.set(oc.id, 'marcar');
   repintarTarefa(botao, oc);
   atualizarContagem();
   atualizarDica();
@@ -704,14 +794,17 @@ async function marcarComFoto(botao, oc) {
     const ruim = (r.resultados || []).find(x => !x.ok);
     if (ruim) throw new Error(ruim.erro);
 
+    emAndamento.delete(oc.id);
+    const antes = assinaturaVisivel();
     est = r;
     reaplicarFila();
     guardarCacheDepois();
-    render();
+    if (assinaturaVisivel() !== antes) render();
     toast('Foto enviada ✓');
   } catch (e) {
     // Desfaz: tarefa com foto sempre espera aprovação, então nada de pontos
     // a devolver aqui.
+    emAndamento.delete(oc.id);
     oc.status = 'pendente';
     repintarTarefa(botao, oc);
     atualizarContagem();
@@ -725,6 +818,9 @@ async function marcarComFoto(botao, oc) {
 
 // ------------------------------------------------------------- entrada
 function sair(msg) {
+  estruturaHoje = '';
+  const hoje = document.getElementById('v-hoje');
+  if (hoje) delete hoje.dataset.montada;
   conf = {};
   est = null;
   fila = [];
@@ -836,6 +932,10 @@ function vazio(em, titulo, desc) {
 }
 
 // ------------------------------------------------------------ saldos dela
+function textoStreak() {
+  return `🔥 ${est.streak} ${est.streak === 1 ? 'dia seguido' : 'dias seguidos'}`;
+}
+
 function blocoSaldos() {
   const { gastavel, cofrinho } = est.saldo;
   const min = est.porMinuto > 0 ? Math.floor(gastavel / est.porMinuto) : null;
@@ -851,13 +951,14 @@ function blocoSaldos() {
     <div class="saldo c">
       <div class="rot">COFRINHO</div>
       <div class="val" data-saldo="cofrinho">${cofrinho}</div>
-      ${meta ? `<div class="eq">${Math.round(fr * 100)}% da meta</div>
-        <div class="barra c" style="margin-top:5px;height:6px"><div style="width:${fr * 100}%"></div></div>` : ''}
+      ${meta ? `<div class="eq" data-saldo="meta">${Math.round(fr * 100)}% da meta</div>
+        <div class="barra c" style="margin-top:5px;height:6px">
+          <div data-saldo="metabarra" style="width:${fr * 100}%"></div></div>` : ''}
     </div>
   </div>
-  ${est.streak > 0 ? `<div style="margin-top:12px">
-    <span class="chip warn">🔥 ${est.streak} ${est.streak === 1 ? 'dia seguido' : 'dias seguidos'}</span>
-  </div>` : ''}`;
+  <div data-streak style="margin-top:12px" ${est.streak > 0 ? '' : 'hidden'}>
+    <span class="chip warn">${textoStreak()}</span>
+  </div>`;
 }
 
 // ---------------------------------------------------------------- Hoje
@@ -926,7 +1027,26 @@ function repintarSaldos() {
   if (eq && est.porMinuto > 0) {
     eq.textContent = `≈ ${Math.floor(est.saldo.gastavel / est.porMinuto)} min de tela`;
   }
+
+  const meta = est.recompensas.find(r => r.tipo === 'meta');
+  if (meta) {
+    const fr = Math.min(1, est.saldo.cofrinho / meta.custo);
+    const pct = document.querySelector('[data-saldo="meta"]');
+    const barra = document.querySelector('[data-saldo="metabarra"]');
+    if (pct) pct.textContent = `${Math.round(fr * 100)}% da meta`;
+    if (barra) barra.style.width = `${fr * 100}%`;
+  }
+
+  const streak = document.querySelector('[data-streak]');
+  if (streak) {
+    streak.hidden = !(est.streak > 0);
+    const chip = streak.querySelector('.chip');
+    if (chip) chip.textContent = textoStreak();
+  }
 }
+
+/** Conjunto de tarefas que está desenhado agora, para saber se dá para repintar. */
+let estruturaHoje = '';
 
 function telaHoje(el) {
   const doDia = est.ocorrencias.filter(o => o.data === est.hoje);
@@ -934,6 +1054,24 @@ function telaHoje(el) {
   const atrasadas = est.ocorrencias.filter(o =>
     o.data < est.hoje && o.data >= limite && (o.status === 'pendente' || o.status === 'recusada'));
   const dias = [...new Set(atrasadas.map(o => o.data))].sort().reverse();
+
+  // Mesmo conjunto de tarefas: repinta o que mudou e não reconstrói a tela.
+  //
+  // Reconstruir faz o navegador recriar todos os cartões de uma vez. Num
+  // celular isso pisca — e piscar logo depois do toque é lido como a tarefa
+  // "voltando e sumindo de novo".
+  const todas = doDia.concat(atrasadas);
+  const estrutura = todas.map(o => o.id).join(',');
+  if (estrutura === estruturaHoje && el.dataset.montada === '1') {
+    todas.forEach(o => {
+      const b = el.querySelector(`[data-oc="${o.id}"]`);
+      if (b) repintarTarefa(b, o);
+    });
+    repintarSaldos();
+    atualizarContagem();
+    atualizarDica();
+    return;
+  }
 
   let html = blocoSaldos();
 
@@ -965,6 +1103,9 @@ function telaHoje(el) {
   }
 
   el.innerHTML = html;
+  el.dataset.montada = '1';
+  estruturaHoje = estrutura;
+
   el.querySelectorAll('[data-oc]').forEach(b => {
     b.onclick = () => {
       const oc = est.ocorrencias.find(o => o.id === b.dataset.oc);
@@ -978,6 +1119,7 @@ function telaHoje(el) {
 
       // Nenhum dos dois sentidos pede confirmação: cada um desfaz o outro.
       const desfazendo = desmarcavelAgora(oc);
+      anotar((desfazendo ? 'desmarca' : 'marca') + ' ' + oc.titulo);
       if (desfazendo) desmarcarLocal(oc); else marcarLocal(oc);
 
       // Repinta o cartão e os saldos, e nada mais. Reconstruir a tela inteira
@@ -1779,6 +1921,11 @@ $('#perfil').addEventListener('click', () => {
     sair();
   }
 });
+
+if (DEPURANDO) {
+  document.body.classList.add('depurando');
+  anotar('modo diagnóstico ligado');
+}
 
 if (!conf.url) $('#campoUrl').hidden = false;
 
