@@ -433,6 +433,25 @@ function montarEstado(pessoa, cfg) {
       return diferencaEmDias(o.data, hoje) <= 40;
     }),
     recompensas: recompensas,
+    // Para a tela de edição: tudo, inclusive desativado. Só para o pai — a
+    // filha não precisa ver o que está fora da loja.
+    tarefas: pessoa.papel === 'pai' ? ler('Tarefas').map(function (t) {
+      return {
+        id: t.id, titulo: t.titulo, icone: t.icone, tipo: t.tipo,
+        pontos: Number(t.pontos) || 0, periodo: t.periodo || 'qualquer',
+        recorrencia: t.recorrencia || 'diaria', dias: String(t.dias || ''),
+        precisa_aprovacao: booleano(t.precisa_aprovacao),
+        conta_mesada: booleano(t.conta_mesada),
+        ativa: booleano(t.ativa)
+      };
+    }) : [],
+    catalogo: pessoa.papel === 'pai' ? ler('Recompensas').map(function (r) {
+      return {
+        id: r.id, titulo: r.titulo, icone: r.icone, tipo: r.tipo,
+        bolso: r.bolso, custo: Number(r.custo) || 0,
+        minutos: Number(r.minutos) || 0, ativa: booleano(r.ativa)
+      };
+    }) : [],
     resgates: resgates.slice(-40),
     extrato: extrato.slice(-80).reverse(),
     semanas: ler('Semanas').map(function (s) {
@@ -624,8 +643,109 @@ function acaoPagarSemana(pessoa, cfg, dados) {
   return { ok: true };
 }
 
+// ------------------------------------------------- editar pelo app
+var PERIODOS_VALIDOS = ['manha', 'tarde', 'noite', 'qualquer'];
+var RECORRENCIAS_VALIDAS = ['diaria', 'semana', 'fimdesemana', 'dias', 'avulsa'];
+
+function simNao(v) { return v ? 'sim' : 'nao'; }
+
+function acaoSalvarTarefa(pessoa, cfg, dados) {
+  exigirPai(pessoa);
+  var t = dados.tarefa || {};
+
+  var titulo = String(t.titulo || '').trim();
+  if (!titulo) throw new Error('a tarefa precisa de um nome');
+
+  var tipo = t.tipo === 'basica' ? 'basica' : 'extra';
+  var pontos = Math.max(0, Math.round(Number(t.pontos) || 0));
+  var periodo = PERIODOS_VALIDOS.indexOf(t.periodo) >= 0 ? t.periodo : 'qualquer';
+  var recorrencia = RECORRENCIAS_VALIDAS.indexOf(t.recorrencia) >= 0 ? t.recorrencia : 'diaria';
+  var dias = String(t.dias || '').trim();
+
+  if (recorrencia === 'dias' && !dias) throw new Error('escolha pelo menos um dia da semana');
+  if (recorrencia === 'avulsa' && !/^\d{4}-\d{2}-\d{2}$/.test(dias)) {
+    throw new Error('tarefa avulsa precisa de uma data (AAAA-MM-DD)');
+  }
+
+  // Foto implicaria aprovação; aqui o equivalente é: o que precisa de conferência
+  // vai para a fila. Mantemos a escolha livre.
+  var campos = {
+    titulo: titulo,
+    icone: String(t.icone || '').trim(),
+    tipo: tipo,
+    pontos: pontos,
+    periodo: periodo,
+    recorrencia: recorrencia,
+    dias: dias,
+    precisa_aprovacao: simNao(t.precisa_aprovacao),
+    conta_mesada: simNao(t.conta_mesada !== false),
+    ativa: simNao(t.ativa !== false)
+  };
+
+  var existente = String(t.id || '').trim()
+    ? ler('Tarefas').filter(function (x) { return String(x.id) === String(t.id); })[0]
+    : null;
+
+  if (existente) {
+    Object.keys(campos).forEach(function (c) {
+      escrever('Tarefas', existente._linha, c, campos[c]);
+    });
+    return { id: existente.id, novo: false };
+  }
+
+  campos.id = novoId('tf');
+  // Nasce hoje: sem isto, a tarefa nova geraria ocorrências atrasadas nos dias
+  // anteriores, todas expiradas, derrubando a semana dela.
+  campos.criada_em = hojeLocal(cfg);
+  anexar('Tarefas', campos);
+  return { id: campos.id, novo: true };
+}
+
+function acaoSalvarRecompensa(pessoa, cfg, dados) {
+  exigirPai(pessoa);
+  var r = dados.recompensa || {};
+
+  var titulo = String(r.titulo || '').trim();
+  if (!titulo) throw new Error('a recompensa precisa de um nome');
+
+  var custo = Math.round(Number(r.custo) || 0);
+  if (custo <= 0) throw new Error('o custo precisa ser maior que zero');
+
+  var tipo = ['tela', 'privilegio', 'meta'].indexOf(r.tipo) >= 0 ? r.tipo : 'privilegio';
+  var minutos = tipo === 'tela' ? Math.max(0, Math.round(Number(r.minutos) || 0)) : 0;
+  if (tipo === 'tela' && !minutos) throw new Error('diga quantos minutos de tela isso vale');
+
+  var campos = {
+    titulo: titulo,
+    icone: String(r.icone || '').trim(),
+    tipo: tipo,
+    // Meta grande só sai do cofrinho: é isso que impede gastar a poupança em tela.
+    bolso: tipo === 'meta' ? 'cofrinho' : (r.bolso === 'cofrinho' ? 'cofrinho' : 'gastavel'),
+    custo: custo,
+    minutos: minutos,
+    ativa: simNao(r.ativa !== false)
+  };
+
+  var existente = String(r.id || '').trim()
+    ? ler('Recompensas').filter(function (x) { return String(x.id) === String(r.id); })[0]
+    : null;
+
+  if (existente) {
+    Object.keys(campos).forEach(function (c) {
+      escrever('Recompensas', existente._linha, c, campos[c]);
+    });
+    return { id: existente.id, novo: false };
+  }
+
+  campos.id = novoId('rc');
+  anexar('Recompensas', campos);
+  return { id: campos.id, novo: true };
+}
+
 var ACOES = {
   marcar: acaoMarcar,
+  salvarTarefa: acaoSalvarTarefa,
+  salvarRecompensa: acaoSalvarRecompensa,
   decidir: acaoDecidir,
   pedir: acaoPedir,
   decidirResgate: acaoDecidirResgate,

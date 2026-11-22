@@ -143,6 +143,16 @@ label{display:block;font-size:.72rem;font-weight:800;letter-spacing:.06em;text-t
   color:var(--muted);margin:0 0 6px}
 .campo + .campo{margin-top:12px}
 
+.ops{display:flex;gap:6px;flex-wrap:wrap}
+.op{padding:9px 13px;border-radius:99px;background:var(--card2);color:var(--text);border:0;
+  font-size:.82rem;font-weight:700;transition:background .15s,color .15s}
+.op.on{background:var(--accent);color:#fff}
+.dia{width:38px;height:38px;border-radius:50%;padding:0;font-size:.82rem}
+.editavel{width:100%;text-align:left;background:var(--card);border:1px solid var(--line);
+  border-radius:var(--r);padding:14px;color:var(--text)}
+.editavel + .editavel{margin-top:8px}
+.editavel.off{opacity:.5}
+
 #toast{position:fixed;left:50%;bottom:92px;transform:translateX(-50%) translateY(20px);
   background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:11px 16px;
   font-size:.88rem;font-weight:600;z-index:20;opacity:0;pointer-events:none;
@@ -196,6 +206,7 @@ body.sem-codigo header,body.sem-codigo main,body.sem-codigo nav{display:none}
   <div class="view" id="v-extrato"></div>
   <div class="view" id="v-fila"></div>
   <div class="view" id="v-semana"></div>
+  <div class="view" id="v-editar"></div>
   <div class="view" id="v-ajustes"></div>
 </main>
 
@@ -358,6 +369,16 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden && conf.codigo) sincronizar();
 });
 
+// Enquanto a tela está aberta, busca novidade de tempos em tempos.
+//
+// Sem isto, quem fica com o app aberto nunca vê nada novo: você olhando a Fila
+// não veria ela marcar, e ela não veria a tarefa que você acabou de criar nem
+// o resgate que você aprovou. São duas pessoas mexendo ao mesmo tempo — a tela
+// precisa se mexer sozinha.
+setInterval(() => {
+  if (!document.hidden && conf.codigo) sincronizar();
+}, 45000);
+
 // -------------------------------------------------------- otimismo local
 /** Mostra o efeito antes de o servidor confirmar, para o toque não parecer falho. */
 function marcarLocal(oc) {
@@ -428,8 +449,8 @@ $('#btEntrar').addEventListener('click', async () => {
 const NAV = {
   filha: [['hoje', '✅', 'Hoje'], ['loja', '🎁', 'Loja'], ['meta', '🎯', 'Meta'],
           ['extrato', '🧾', 'Extrato']],
-  pai:   [['fila', '📥', 'Fila'], ['semana', '💰', 'Semana'], ['extrato', '🧾', 'Extrato'],
-          ['ajustes', '⚙️', 'Ajustes']],
+  pai:   [['fila', '📥', 'Fila'], ['editar', '📋', 'Editar'], ['semana', '💰', 'Semana'],
+          ['extrato', '🧾', 'Extrato'], ['ajustes', '⚙️', 'Ajustes']],
 };
 
 function render() {
@@ -449,7 +470,13 @@ function render() {
     `<button data-aba="${id}" class="${id === aba ? 'on' : ''}">
        <i>${ico}</i>${esc(nome)}</button>`).join('');
   $('#nav').querySelectorAll('button').forEach(b => {
-    b.onclick = () => { aba = b.dataset.aba; guardar(ABA, aba); render(); };
+    b.onclick = () => {
+      aba = b.dataset.aba;
+      editando = null;
+      guardar(ABA, aba);
+      render();
+      sincronizar();   // trocar de aba é o gesto de "e agora?"
+    };
   });
 
   document.querySelectorAll('.view').forEach(v => v.classList.remove('on'));
@@ -457,7 +484,8 @@ function render() {
   if (alvo) {
     alvo.classList.add('on');
     ({ hoje: telaHoje, loja: telaLoja, meta: telaMeta, extrato: telaExtrato,
-       fila: telaFila, semana: telaSemana, ajustes: telaAjustes }[aba] || (() => {}))(alvo);
+       fila: telaFila, semana: telaSemana, editar: telaEditar,
+       ajustes: telaAjustes }[aba] || (() => {}))(alvo);
   }
   mostrarStatus();
 }
@@ -932,13 +960,244 @@ function telaSemana(el) {
   });
 }
 
+// -------------------------------------------------------------- Editar
+// Tarefas e recompensas se editam aqui, no celular. A planilha continua sendo
+// a verdade e dá para mexer nela, mas abrir o Sheets no telefone para
+// acrescentar "passear com o cachorro" é sofrível.
+
+let editando = null;   // { o: 'tarefa' | 'recompensa', d: {...} }
+let listaEditar = 'tarefas';
+
+const PERIODO_NOME = { manha: 'Manhã', tarde: 'Tarde', noite: 'Noite', qualquer: 'Qualquer hora' };
+const RECOR_NOME = {
+  diaria: 'Todo dia', semana: 'Dias de semana', fimdesemana: 'Fim de semana',
+  dias: 'Dias certos', avulsa: 'Uma vez',
+};
+const LETRA_DIA = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+
+function opcoes(campo, valor, mapa) {
+  return `<div class="ops">${Object.keys(mapa).map(v =>
+    `<button class="op ${v === valor ? 'on' : ''}" data-campo="${campo}" data-valor="${esc(v)}">
+      ${esc(mapa[v])}</button>`).join('')}</div>`;
+}
+
+function simNao(campo, valor, rotulo, ajuda) {
+  return `<div class="campo">
+    <label>${esc(rotulo)}</label>
+    ${ajuda ? `<p class="muted xs" style="margin:-2px 0 7px">${esc(ajuda)}</p>` : ''}
+    ${opcoes(campo, valor ? 'sim' : 'nao', { sim: 'Sim', nao: 'Não' })}
+  </div>`;
+}
+
+function campoTexto(campo, rotulo, valor, dica, numerico) {
+  return `<div class="campo"><label>${esc(rotulo)}</label>
+    <input id="f-${campo}" value="${esc(valor ?? '')}" placeholder="${esc(dica || '')}"
+      ${numerico ? 'inputmode="numeric"' : ''}></div>`;
+}
+
+function telaEditar(el) {
+  if (editando) return formulario(el);
+
+  const tarefas = est.tarefas || [];
+  const catalogo = est.catalogo || [];
+
+  const grupo = (titulo, itens, render) => itens.length
+    ? `<h2>${esc(titulo)}</h2>` + itens.map(render).join('') : '';
+
+  const cardTarefa = t => `<button class="editavel ${t.ativa ? '' : 'off'}"
+      data-editar-tarefa="${esc(t.id)}">
+      <div class="row"><span style="font-size:22px">${esc(t.icone || '⭐')}</span>
+        <span class="grow"><b>${esc(t.titulo)}</b>
+          <div class="tags" style="margin-top:4px">
+            ${t.pontos > 0 ? `<span class="chip acc">+${t.pontos}</span>`
+                           : '<span class="chip">dever</span>'}
+            <span class="chip">${esc(PERIODO_NOME[t.periodo] || t.periodo)}</span>
+            <span class="chip">${esc(RECOR_NOME[t.recorrencia] || t.recorrencia)}</span>
+            ${t.precisa_aprovacao ? '<span class="chip warn">precisa aprovar</span>' : ''}
+            ${t.conta_mesada ? '' : '<span class="chip">fora da mesada</span>'}
+            ${t.ativa ? '' : '<span class="chip bad">desativada</span>'}
+          </div></span></div></button>`;
+
+  const cardRecompensa = r => `<button class="editavel ${r.ativa ? '' : 'off'}"
+      data-editar-recompensa="${esc(r.id)}">
+      <div class="row"><span style="font-size:22px">${esc(r.icone || '🎁')}</span>
+        <span class="grow"><b>${esc(r.titulo)}</b>
+          <div class="tags" style="margin-top:4px">
+            <span class="chip acc">${r.custo} pts</span>
+            ${r.minutos ? `<span class="chip">${r.minutos} min</span>` : ''}
+            ${r.bolso === 'cofrinho' ? '<span class="chip cofre">cofrinho</span>' : ''}
+            ${r.ativa ? '' : '<span class="chip bad">desativada</span>'}
+          </div></span></div></button>`;
+
+  el.innerHTML = `
+    <div class="ops" style="margin-bottom:16px">
+      <button class="op ${listaEditar === 'tarefas' ? 'on' : ''}" data-lista="tarefas">Tarefas</button>
+      <button class="op ${listaEditar === 'recompensas' ? 'on' : ''}" data-lista="recompensas">Recompensas</button>
+    </div>
+    ${listaEditar === 'tarefas' ? `
+      <button class="bt" data-nova="tarefa">+ Nova tarefa</button>
+      ${grupo('Extras (pagam pontos)', tarefas.filter(t => t.ativa && t.tipo === 'extra'), cardTarefa)}
+      ${grupo('Básicas (dever)', tarefas.filter(t => t.ativa && t.tipo === 'basica'), cardTarefa)}
+      ${grupo('Desativadas', tarefas.filter(t => !t.ativa), cardTarefa)}`
+    : `
+      <button class="bt" data-nova="recompensa">+ Nova recompensa</button>
+      ${grupo('Tempo de tela', catalogo.filter(r => r.ativa && r.tipo === 'tela'), cardRecompensa)}
+      ${grupo('Privilégios', catalogo.filter(r => r.ativa && r.tipo === 'privilegio'), cardRecompensa)}
+      ${grupo('Meta grande', catalogo.filter(r => r.ativa && r.tipo === 'meta'), cardRecompensa)}
+      ${grupo('Desativadas', catalogo.filter(r => !r.ativa), cardRecompensa)}`}`;
+
+  el.querySelectorAll('[data-lista]').forEach(b => {
+    b.onclick = () => { listaEditar = b.dataset.lista; render(); };
+  });
+  el.querySelectorAll('[data-nova]').forEach(b => {
+    b.onclick = () => {
+      editando = b.dataset.nova === 'tarefa'
+        ? { o: 'tarefa', d: { tipo: 'extra', pontos: 20, periodo: 'qualquer',
+                              recorrencia: 'diaria', dias: '', precisa_aprovacao: false,
+                              conta_mesada: true, ativa: true } }
+        : { o: 'recompensa', d: { tipo: 'privilegio', bolso: 'gastavel', custo: 50,
+                                  minutos: 0, ativa: true } };
+      render();
+    };
+  });
+  el.querySelectorAll('[data-editar-tarefa]').forEach(b => {
+    b.onclick = () => {
+      editando = { o: 'tarefa', d: { ...est.tarefas.find(t => t.id === b.dataset.editarTarefa) } };
+      render();
+    };
+  });
+  el.querySelectorAll('[data-editar-recompensa]').forEach(b => {
+    b.onclick = () => {
+      editando = { o: 'recompensa',
+                   d: { ...est.catalogo.find(r => r.id === b.dataset.editarRecompensa) } };
+      render();
+    };
+  });
+}
+
+function formulario(el) {
+  const { o, d } = editando;
+  const novo = !d.id;
+
+  el.innerHTML = o === 'tarefa' ? `
+    <h2 style="margin-top:0">${novo ? 'Nova tarefa' : 'Editar tarefa'}</h2>
+    ${campoTexto('titulo', 'Nome', d.titulo, 'Passear com o cachorro')}
+    ${campoTexto('icone', 'Emoji', d.icone, '🐕')}
+    <div class="campo"><label>Tipo</label>
+      ${opcoes('tipo', d.tipo, { extra: 'Extra (paga pontos)', basica: 'Básica (dever)' })}</div>
+    ${d.tipo === 'extra' ? campoTexto('pontos', 'Pontos', d.pontos, '20', true)
+      : `<div class="aviso warn">Tarefa básica não paga pontos, mas conta para o
+         percentual da mesada e para o streak.</div>`}
+    <div class="campo"><label>Momento do dia</label>
+      ${opcoes('periodo', d.periodo, PERIODO_NOME)}</div>
+    <div class="campo"><label>Quando repete</label>
+      ${opcoes('recorrencia', d.recorrencia, RECOR_NOME)}</div>
+    ${d.recorrencia === 'dias' ? `<div class="campo"><label>Dias</label>
+      <div class="ops">${LETRA_DIA.map((l, i) => {
+        const marcados = String(d.dias || '').split(',').filter(Boolean);
+        return `<button class="op dia ${marcados.includes(String(i)) ? 'on' : ''}"
+          data-dia="${i}">${l}</button>`;
+      }).join('')}</div></div>` : ''}
+    ${d.recorrencia === 'avulsa' ? campoTexto('dias', 'Data (AAAA-MM-DD)', d.dias, '2026-12-24') : ''}
+    ${simNao('precisa_aprovacao', d.precisa_aprovacao, 'Precisa da sua aprovação',
+      'Deixe "Não" no que você vê de qualquer jeito: senão você vira o gargalo.')}
+    ${simNao('conta_mesada', d.conta_mesada, 'Conta para a mesada',
+      'Entra no percentual da semana e no streak.')}
+    ${simNao('ativa', d.ativa, 'Ativa', 'Desativar para de gerar; o histórico fica.')}
+    <div class="bts" style="margin-top:18px">
+      <button class="bt ghost" id="btCancelar">Cancelar</button>
+      <button class="bt" id="btSalvar">Salvar</button>
+    </div>`
+  : `
+    <h2 style="margin-top:0">${novo ? 'Nova recompensa' : 'Editar recompensa'}</h2>
+    ${campoTexto('titulo', 'Nome', d.titulo, '30 min de tela')}
+    ${campoTexto('icone', 'Emoji', d.icone, '📱')}
+    <div class="campo"><label>Tipo</label>
+      ${opcoes('tipo', d.tipo, { tela: 'Tempo de tela', privilegio: 'Privilégio', meta: 'Meta grande' })}</div>
+    ${campoTexto('custo', 'Custo em pontos', d.custo, '60', true)}
+    ${d.tipo === 'tela' ? campoTexto('minutos', 'Minutos de tela', d.minutos, '30', true) : ''}
+    ${d.tipo === 'meta'
+      ? `<div class="aviso warn">Meta grande sai só do cofrinho. É isso que impede
+         ela de gastar a poupança da meta em tela.</div>`
+      : `<div class="campo"><label>Sai de qual saldo</label>
+         ${opcoes('bolso', d.bolso, { gastavel: 'Gastável', cofrinho: 'Cofrinho' })}</div>`}
+    ${simNao('ativa', d.ativa, 'Ativa', 'Desativada não aparece na loja dela.')}
+    <div class="bts" style="margin-top:18px">
+      <button class="bt ghost" id="btCancelar">Cancelar</button>
+      <button class="bt" id="btSalvar">Salvar</button>
+    </div>`;
+
+  // Trocar uma opção redesenha, porque os campos visíveis dependem dela
+  // (pontos some em tarefa básica, minutos só existe em tela).
+  el.querySelectorAll('[data-campo]').forEach(b => {
+    b.onclick = () => {
+      lerCampos(el);
+      const v = b.dataset.valor;
+      d[b.dataset.campo] = v === 'sim' ? true : v === 'nao' ? false : v;
+      render();
+    };
+  });
+  el.querySelectorAll('[data-dia]').forEach(b => {
+    b.onclick = () => {
+      lerCampos(el);
+      const marcados = String(d.dias || '').split(',').filter(Boolean);
+      const i = b.dataset.dia;
+      d.dias = (marcados.includes(i) ? marcados.filter(x => x !== i) : [...marcados, i])
+        .sort().join(',');
+      render();
+    };
+  });
+
+  $('#btCancelar').onclick = () => { editando = null; render(); };
+  $('#btSalvar').onclick = () => {
+    lerCampos(el);
+    if (!String(d.titulo || '').trim()) return toast('Falta o nome.');
+    if (o === 'tarefa' && d.recorrencia === 'dias' && !d.dias) {
+      return toast('Escolha pelo menos um dia da semana.');
+    }
+    if (o === 'recompensa' && !(Number(d.custo) > 0)) return toast('O custo precisa ser maior que zero.');
+    if (o === 'recompensa' && d.tipo === 'tela' && !(Number(d.minutos) > 0)) {
+      return toast('Diga quantos minutos de tela isso vale.');
+    }
+
+    // Mostra na lista antes de o servidor confirmar.
+    const alvo = o === 'tarefa' ? 'tarefas' : 'catalogo';
+    const copia = { ...d };
+    if (!copia.id) {
+      copia.id = 'local-' + Date.now();
+      est[alvo] = [...(est[alvo] || []), copia];
+    } else {
+      est[alvo] = est[alvo].map(x => (x.id === copia.id ? copia : x));
+    }
+    guardar(CACHE, est);
+
+    enfileirar(o === 'tarefa'
+      ? { acao: 'salvarTarefa', tarefa: { ...d, id: String(d.id || '').startsWith('local-') ? '' : d.id } }
+      : { acao: 'salvarRecompensa', recompensa: { ...d, id: String(d.id || '').startsWith('local-') ? '' : d.id } });
+
+    editando = null;
+    toast('Salvando…');
+    render();
+  };
+}
+
+/** Guarda o que está digitado antes de redesenhar, para não perder o texto. */
+function lerCampos(el) {
+  el.querySelectorAll('input[id^="f-"]').forEach(i => {
+    const campo = i.id.slice(2);
+    const numerico = ['pontos', 'custo', 'minutos'].includes(campo);
+    editando.d[campo] = numerico ? Number(i.value) || 0 : i.value;
+  });
+}
+
 // ------------------------------------------------------------- Ajustes
 function telaAjustes(el) {
   el.innerHTML = `
     <div class="card">
-      <h2 style="margin-top:0">A planilha é o painel</h2>
-      <p class="muted sm">Tarefas, pontos, preços das recompensas e as faixas da mesada
-      se editam direto na planilha. Nada aqui precisa ser recompilado.</p>
+      <h2 style="margin-top:0">A planilha</h2>
+      <p class="muted sm">Tarefas e recompensas se editam na aba <b>Editar</b>, aqui no
+      app. A planilha continua sendo a verdade: use-a no computador para mexer nas
+      faixas da mesada, conferir o histórico ou corrigir algo na mão.</p>
       ${est.planilha ? `<a href="${esc(est.planilha)}" target="_blank" rel="noopener"
         class="bt" style="display:block;text-align:center;text-decoration:none">
         Abrir a planilha</a>` : ''}

@@ -57,7 +57,13 @@ celular para outra planilha sem mexer no código.
 
 ## Viver com isso
 
-Tudo que você vai querer mudar está **na planilha**, não no código:
+Tarefas e recompensas se criam e editam **no próprio app**, na aba **Editar** do
+seu celular: nome, emoji, pontos, horário, recorrência, se precisa da sua
+aprovação. Não precisa abrir a planilha para o dia a dia.
+
+A planilha continua sendo a verdade, e no computador ela é melhor para o que é
+raro ou em lote: faixas da mesada, conferir histórico, corrigir algo na mão.
+Linha digitada lá precisa só do título — o script completa o resto.
 
 | Aba | Para quê |
 |---|---|
@@ -70,11 +76,13 @@ Tudo que você vai querer mudar está **na planilha**, não no código:
 A planilha também ganha um menu **Tarefas** com atalhos para instalar, gerar os
 dias, ver os códigos e rodar um diagnóstico.
 
-### Criar uma tarefa
+### Criar uma tarefa pela planilha
 
-Escreva uma linha nova na aba `Tarefas`. **Só o título é obrigatório** — o resto
-o script completa sozinho na próxima vez que o app abrir, e as colunas de
-escolha são listas suspensas, então não dá para errar a grafia.
+Pelo app é mais rápido (aba **Editar → + Nova tarefa**). Mas se preferir a
+planilha, escreva uma linha nova na aba `Tarefas`. **Só o título é
+obrigatório** — o resto o script completa sozinho na próxima vez que o app
+abrir, e as colunas de escolha são listas suspensas, então não dá para errar a
+grafia.
 
 | Coluna | O que é | Em branco vira |
 |---|---|---|
@@ -100,7 +108,7 @@ nos dias anteriores, que entrariam como não feitas e derrubariam a semana dela.
 Para desativar uma tarefa, ponha `ativa` em `nao` — não apague a linha, senão o
 histórico perde a referência.
 
-### Criar uma recompensa
+### Criar uma recompensa pela planilha
 
 Mesma ideia na aba `Recompensas`: título e custo bastam.
 

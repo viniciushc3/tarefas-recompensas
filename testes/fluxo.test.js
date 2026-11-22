@@ -380,3 +380,114 @@ test('instalar põe listas suspensas nas colunas de escolha', () => {
   assert.deepEqual(recorrencia.regra.valores,
     ['diaria', 'semana', 'fimdesemana', 'dias', 'avulsa']);
 });
+
+// ----------------------------------------------------- editar pelo app
+test('o pai cria tarefa pelo app e ela nasce hoje', () => {
+  const { api, cfg, hoje } = montar();
+  const r = estado(api, cfg.codigoPai, [{
+    acao: 'salvarTarefa', ref: 0,
+    tarefa: { titulo: 'Passear com o cachorro', icone: '🐕', tipo: 'extra', pontos: 25,
+              periodo: 'tarde', recorrencia: 'diaria', precisa_aprovacao: false,
+              conta_mesada: true, ativa: true },
+  }]);
+  assert.equal(r.resultados[0].ok, true, r.resultados[0].erro);
+  assert.equal(r.resultados[0].dados.novo, true);
+
+  const t = api.ler('Tarefas').find(x => x.titulo === 'Passear com o cachorro');
+  assert.equal(String(t.criada_em), hoje, 'tem de nascer hoje, não retroativa');
+  assert.equal(t.periodo, 'tarde');
+
+  const ocs = api.ler('Ocorrencias').filter(o => o.titulo === 'Passear com o cachorro');
+  assert.equal(ocs.length, 1);
+  assert.equal(String(ocs[0].data), hoje);
+});
+
+test('editar tarefa não duplica nem reescreve o histórico', () => {
+  const { api, cfg } = montar();
+  let e = estado(api, cfg.codigoPai);
+  const antes = api.ler('Tarefas').length;
+  const alvo = e.tarefas.find(t => t.titulo === 'Tirar o lixo');
+
+  // marca hoje pelos 20 pontos originais
+  const oc = e.ocorrencias.find(o => o.titulo === 'Tirar o lixo' && o.data === e.hoje);
+  estado(api, cfg.codigoFilha, [{ acao: 'marcar', id: oc.id, ref: 0 }]);
+
+  // agora muda o preço
+  e = estado(api, cfg.codigoPai, [{
+    acao: 'salvarTarefa', ref: 0,
+    tarefa: { ...alvo, titulo: 'Tirar o lixo e reciclar', pontos: 35 },
+  }]);
+  assert.equal(e.resultados[0].dados.novo, false);
+  assert.equal(api.ler('Tarefas').length, antes, 'duplicou a tarefa');
+
+  const guardada = api.ler('Ocorrencias').find(o => o.id === oc.id);
+  assert.equal(guardada.titulo, 'Tirar o lixo', 'o snapshot de ontem mudou');
+  assert.equal(Number(guardada.pontos), 20, 'o preço do histórico mudou');
+  assert.deepEqual(e.saldo, { gastavel: 14, cofrinho: 6 }, 'o crédito já dado mudou');
+});
+
+test('a filha não cria nem edita nada', () => {
+  const { api, cfg } = montar();
+  const antes = api.ler('Tarefas').length;
+  const r = estado(api, cfg.codigoFilha, [
+    { acao: 'salvarTarefa', tarefa: { titulo: 'Ganhar 1000 pontos', pontos: 1000 }, ref: 0 },
+    { acao: 'salvarRecompensa', recompensa: { titulo: 'Tela infinita', custo: 1 }, ref: 1 },
+  ]);
+  r.resultados.forEach(x => {
+    assert.equal(x.ok, false);
+    assert.match(x.erro, /responsável/);
+  });
+  assert.equal(api.ler('Tarefas').length, antes);
+});
+
+test('a filha não recebe as listas de edição', () => {
+  const { api, cfg } = montar();
+  const dela = estado(api, cfg.codigoFilha);
+  assert.deepEqual(dela.tarefas, []);
+  assert.deepEqual(dela.catalogo, []);
+  assert.ok(estado(api, cfg.codigoPai).tarefas.length > 0);
+});
+
+test('validações do formulário também valem no servidor', () => {
+  const { api, cfg } = montar();
+  const r = estado(api, cfg.codigoPai, [
+    { acao: 'salvarTarefa', tarefa: { titulo: '   ' }, ref: 0 },
+    { acao: 'salvarTarefa', tarefa: { titulo: 'X', recorrencia: 'dias', dias: '' }, ref: 1 },
+    { acao: 'salvarTarefa', tarefa: { titulo: 'X', recorrencia: 'avulsa', dias: 'amanhã' }, ref: 2 },
+    { acao: 'salvarRecompensa', recompensa: { titulo: 'X', custo: 0 }, ref: 3 },
+    { acao: 'salvarRecompensa', recompensa: { titulo: 'X', custo: 10, tipo: 'tela', minutos: 0 }, ref: 4 },
+  ]);
+  assert.match(r.resultados[0].erro, /nome/);
+  assert.match(r.resultados[1].erro, /dia da semana/);
+  assert.match(r.resultados[2].erro, /AAAA-MM-DD/);
+  assert.match(r.resultados[3].erro, /maior que zero/);
+  assert.match(r.resultados[4].erro, /minutos/);
+});
+
+test('meta grande é forçada para o cofrinho', () => {
+  const { api, cfg } = montar();
+  // mesmo pedindo gastável de propósito
+  estado(api, cfg.codigoPai, [{
+    acao: 'salvarRecompensa', ref: 0,
+    recompensa: { titulo: 'Patinete', tipo: 'meta', bolso: 'gastavel', custo: 3000 },
+  }]);
+  const r = api.ler('Recompensas').find(x => x.titulo === 'Patinete');
+  assert.equal(r.bolso, 'cofrinho', 'meta não pode sair do saldo gastável');
+});
+
+test('desativar tarefa para de gerar mas mantém o histórico', () => {
+  const { api, cfg } = montar();
+  let e = estado(api, cfg.codigoPai);
+  const alvo = e.tarefas.find(t => t.titulo === 'Pôr a mesa');
+  const antes = api.ler('Ocorrencias').filter(o => o.titulo === 'Pôr a mesa').length;
+  assert.ok(antes > 0);
+
+  estado(api, cfg.codigoPai, [{
+    acao: 'salvarTarefa', tarefa: { ...alvo, ativa: false }, ref: 0,
+  }]);
+  const depois = api.ler('Ocorrencias').filter(o => o.titulo === 'Pôr a mesa').length;
+  assert.equal(depois, antes, 'o histórico sumiu');
+
+  e = estado(api, cfg.codigoPai);
+  assert.equal(e.tarefas.find(t => t.id === alvo.id).ativa, false);
+});

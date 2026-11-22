@@ -115,6 +115,34 @@ test('a filha marca uma tarefa e o pai a vê na fila', async (t) => {
   }
   assert.deepEqual(errosSeus, [], 'erro de JS ao navegar nas suas abas');
 
+  // ---------- criar uma tarefa pelo app, sem abrir a planilha
+  await pSeu.click('nav button:has-text("Editar")');
+  await pSeu.click('[data-nova="tarefa"]');
+  await pSeu.fill('#f-titulo', 'Passear com o cachorro');
+  await pSeu.fill('#f-icone', '🐕');
+  await pSeu.fill('#f-pontos', '25');
+  await pSeu.click('.op[data-campo="periodo"][data-valor="tarde"]');
+  // o formulário se redesenha a cada escolha: o texto digitado não pode sumir
+  assert.equal(await pSeu.inputValue('#f-titulo'), 'Passear com o cachorro',
+    'o formulário perdeu o que foi digitado ao trocar de opção');
+  assert.equal(await pSeu.inputValue('#f-pontos'), '25');
+  await pSeu.click('#btSalvar');
+  await pSeu.waitForTimeout(1500);
+
+  assert.match(await pSeu.textContent('#v-editar'), /Passear com o cachorro/,
+    'a tarefa nova não apareceu na lista');
+  const criada = api.ler('Tarefas').find(t => t.titulo === 'Passear com o cachorro');
+  assert.ok(criada, 'a tarefa não chegou na planilha');
+  assert.equal(Number(criada.pontos), 25);
+  assert.equal(criada.periodo, 'tarde');
+  assert.deepEqual(errosSeus, [], 'erro de JS ao editar');
+
+  // e ela aparece no celular dela
+  await pDela.click('nav button:has-text("Hoje")');
+  await pDela.waitForTimeout(1500);
+  assert.match(await pDela.textContent('#v-hoje'), /Passear com o cachorro/,
+    'a tarefa nova não chegou no celular dela');
+
   // o saldo dela subiu os 30 pontos aprovados
   const saldo = api.saldoDe(api.ler('Extrato'));
   assert.deepEqual(saldo, { gastavel: 35, cofrinho: 15 }, 'saldo final errado');
