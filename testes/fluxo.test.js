@@ -861,3 +861,46 @@ test('a foto não viaja junto com o estado', () => {
   assert.ok(!texto.includes(UMA_FOTO), 'a imagem foi junto no estado');
   assert.ok(texto.length < 8000, 'estado inchou: ' + texto.length + ' bytes');
 });
+
+test('planilha antiga: a lista suspensa vai para a coluna certa pelo nome', () => {
+  // Regressão exata do que quebrou em produção: numa planilha criada antes de
+  // precisa_foto existir, a coluna L é criada_em. Calculando a coluna pela
+  // ordem ideal do código, a lista de "sim, nao" caía em cima da data — e
+  // depois disso o script não conseguia mais escrever a data ali.
+  const { criarAmbiente } = require('./apps-script-falso');
+  const api = criarAmbiente();
+  const planilha = api._ambiente.SpreadsheetApp.getActive();
+
+  const ordemAntiga = api.ABAS.Tarefas.filter(c => c !== 'precisa_foto');
+  planilha.insertSheet('Tarefas')
+    .getRange(1, 1, 1, ordemAntiga.length).setValues([ordemAntiga]);
+
+  api.instalar();   // não pode estourar
+
+  const cols = api.ABAS.Tarefas.filter(c => c !== 'precisa_foto').concat('precisa_foto');
+  const validacoes = api._ambiente._abas.get('Tarefas')._validacoes;
+  const campoDe = v => cols[v.c - 1];
+
+  validacoes.forEach(v => {
+    assert.ok(['tipo', 'periodo', 'recorrencia', 'precisa_aprovacao', 'precisa_foto',
+               'conta_mesada', 'ativa'].includes(campoDe(v)),
+      'lista suspensa caiu na coluna ' + campoDe(v));
+  });
+  assert.ok(!validacoes.some(v => campoDe(v) === 'criada_em'),
+    'a coluna de data ficou com lista de sim/nao — foi isso que travou o instalar()');
+
+  // E a data continua gravável.
+  const cfg = api.config();
+  const e = estado(api, cfg.codigoFilha);
+  assert.ok(e.ocorrencias.length > 0, 'não gerou o dia');
+  assert.ok(api.ler('Tarefas').every(t => String(t.criada_em)),
+    'alguma tarefa ficou sem criada_em');
+});
+
+test('instalar de novo não acumula validação em lugar errado', () => {
+  const { api } = montar();
+  const antes = api._ambiente._abas.get('Tarefas')._validacoes.length;
+  api.instalar();
+  assert.equal(api._ambiente._abas.get('Tarefas')._validacoes.length, antes,
+    'as validações estão se empilhando a cada instalar()');
+});

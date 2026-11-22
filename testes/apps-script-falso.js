@@ -43,6 +43,25 @@ function fabricarComoSheets(tz) {
   };
 }
 
+/**
+ * A planilha de verdade RECUSA valor fora da lista suspensa, com um erro feio.
+ * Foi assim que uma lista aplicada na coluna errada travou o instalar().
+ */
+function conferirValidacao(validacoes, linha, coluna, valor) {
+  if (valor === '' || valor === null || valor === undefined) return;
+  for (const v of validacoes) {
+    if (v.c !== coluna) continue;
+    if (linha < v.r || linha >= v.r + v.nr) continue;
+    const lista = v.regra && v.regra.valores;
+    if (lista && lista.indexOf(String(valor)) < 0) {
+      throw new Error('Os dados inseridos na célula ' +
+        String.fromCharCode(64 + coluna) + linha +
+        ' violam o respectivo conjunto de regras de validação de dados. ' +
+        'Insira um destes valores: ' + lista.join(', ') + '.');
+    }
+  }
+}
+
 function criarAba(nome, comoSheets, contador) {
   const linhas = [];
   const validacoes = [];
@@ -54,7 +73,10 @@ function criarAba(nome, comoSheets, contador) {
         const alvo = r - 1 + i;
         while (linhas.length <= alvo) linhas.push([]);
         const linha = linhas[alvo];
-        for (let j = 0; j < vals[i].length; j++) linha[c - 1 + j] = comoSheets(vals[i][j]);
+        for (let j = 0; j < vals[i].length; j++) {
+          conferirValidacao(validacoes, r + i, c + j, vals[i][j]);
+          linha[c - 1 + j] = comoSheets(vals[i][j]);
+        }
       }
       return this;
     },
@@ -67,6 +89,13 @@ function criarAba(nome, comoSheets, contador) {
     },
     setFontWeight() { return this; },
     setDataValidation(regra) { validacoes.push({ r, c, nr, regra }); return this; },
+    clearDataValidations() {
+      for (let i = validacoes.length - 1; i >= 0; i--) {
+        const v = validacoes[i];
+        if (v.c >= c && v.c < c + nc) validacoes.splice(i, 1);
+      }
+      return this;
+    },
   });
 
   return {

@@ -1359,8 +1359,22 @@ function listasSuspensas(existentes) {
   Object.keys(opcoes).forEach(function (nomeAba) {
     var s = existentes[nomeAba];
     if (!s) return;
+
+    // Pelo cabeçalho REAL, não pela ordem de ABAS.
+    //
+    // Numa planilha criada por uma versão anterior as colunas estão em outra
+    // ordem, e usar a ordem ideal punha a lista de "sim, nao" em cima da
+    // coluna de data — depois disso o script não conseguia mais escrever a
+    // data ali, e instalar() morria.
+    var cols = cabecalho(nomeAba);
+    if (!cols.length) return;
+
+    // Limpa antes de aplicar: senão uma validação posta no lugar errado por
+    // uma versão anterior fica lá para sempre.
+    s.getRange(2, 1, 500, cols.length).clearDataValidations();
+
     Object.keys(opcoes[nomeAba]).forEach(function (campo) {
-      var coluna = ABAS[nomeAba].indexOf(campo) + 1;
+      var coluna = cols.indexOf(campo) + 1;
       if (coluna < 1) return;
       var regra = SpreadsheetApp.newDataValidation()
         .requireValueInList(opcoes[nomeAba][campo], true)
