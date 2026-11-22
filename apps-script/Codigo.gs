@@ -32,7 +32,7 @@ var ABAS = {
  * Versão deste arquivo. Aparece no diagnóstico e na resposta do app.
  * Serve para saber, sem adivinhação, qual código está realmente rodando.
  */
-var VERSAO = '2026-11-22.4';
+var VERSAO = '2026-11-22.5';
 
 /**
  * Tamanho da foto. Medido com uma foto de celular de 3000x4000:
@@ -500,6 +500,12 @@ function normalizar(cfg) {
  */
 function garantirDias(cfg, diasParaTras) {
   var hoje = hojeLocal(cfg);
+
+  // Antes de escrever qualquer coisa: se o script mudou de versão, repõe as
+  // validações. Barato (uma leitura de Config, que já está em cache) e evita
+  // depender de alguém abrir o editor para rodar instalar().
+  if (lerConfig('validacoes') !== VERSAO) repararValidacoes();
+
   normalizar(cfg);
   var tarefas = ler('Tarefas').filter(function (t) {
     return booleano(t.ativa) && String(t.id || '').trim() !== '';
@@ -1340,8 +1346,6 @@ function instalar() {
   planilha.getSheets().forEach(function (s) { existentes[s.getName()] = s; });
 
   // Antes de qualquer escrita: tira validação de onde quer que esteja.
-  // Uma regra posta na coluna errada por uma versão anterior impede o script
-  // de gravar, e o erro estoura num ponto que não tem nada a ver com a causa.
   Object.keys(ABAS).forEach(function (nome) {
     var s = existentes[nome];
     if (s) s.getRange(2, 1, 1000, 30).clearDataValidations();
@@ -1417,6 +1421,10 @@ function instalar() {
 
   if (ler('Tarefas').length === 0) semearTarefas();
   if (ler('Recompensas').length === 0) semearRecompensas();
+
+  // Depois de semear o Config: gravar isto antes faria o bloco que cria as
+  // senhas enxergar um Config "já preenchido" e pular — ninguém entraria.
+  gravarConfig('validacoes', VERSAO);
 
   garantirDias(config(), 0);
 
@@ -1512,6 +1520,30 @@ function semearRecompensas() {
  * ou "Semana" com maiúscula fariam a tarefa simplesmente não aparecer. Com
  * lista suspensa não tem como errar.
  */
+function abasPorNome() {
+  var mapa = {};
+  ss().getSheets().forEach(function (s) { mapa[s.getName()] = s; });
+  return mapa;
+}
+
+/**
+ * Tira toda validação das abas e repõe as listas certas.
+ *
+ * Roda sozinha quando a versão do script muda, sem depender de ninguém
+ * lembrar de abrir o editor. Uma regra deixada na coluna errada por uma
+ * versão anterior impede o script de gravar, e o erro aparece num ponto que
+ * não tem nada a ver com a causa — foi o que travou o app duas vezes.
+ */
+function repararValidacoes() {
+  var abas = abasPorNome();
+  Object.keys(ABAS).forEach(function (nome) {
+    var s = abas[nome];
+    if (s) s.getRange(2, 1, 1000, 30).clearDataValidations();
+  });
+  listasSuspensas(abas);
+  gravarConfig('validacoes', VERSAO);
+}
+
 function listasSuspensas(existentes) {
   var opcoes = {
     Tarefas: {

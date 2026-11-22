@@ -1081,3 +1081,36 @@ test('a qualidade da foto vem da planilha, baixa por padrão', () => {
   api.escrever('Config', linha._linha, 'valor', 'altíssima');
   assert.deepEqual(estado(api, cfg.codigoFilha).cfg.foto, { lado: 640, q: 0.45 });
 });
+
+test('regra bloqueante some sozinha, sem rodar instalar()', () => {
+  // O caso real, duas vezes: uma versão anterior deixou "sim, nao" em cima da
+  // coluna de data, e o script não conseguia mais gravar. Eu dependia de
+  // alguém lembrar de rodar instalar() — e o app ficou quebrado para ela.
+  const { api, cfg } = montar();
+
+  const bloqueante = api._ambiente.SpreadsheetApp.newDataValidation()
+    .requireValueInList(['sim', 'nao'], true).setAllowInvalid(false).build();
+  const tarefas = api._ambiente._abas.get('Tarefas');
+  const colunaData = api.ABAS.Tarefas.indexOf('criada_em') + 1;
+  tarefas.getRange(2, colunaData, 500, 1).setDataValidation(bloqueante);
+
+  // E finge que a planilha vem de uma versão anterior.
+  const linha = api.ler('Config').find(c => c.chave === 'validacoes');
+  api.escrever('Config', linha._linha, 'valor', 'versao-velha');
+
+  // Só abrir o app resolve.
+  const e = estado(api, cfg.codigoFilha);
+  assert.ok(e.ocorrencias.length > 0);
+  assert.equal(api.ler('Config').find(c => c.chave === 'validacoes').valor, api.VERSAO);
+  assert.ok(tarefas._validacoes.every(v => v.regra.permiteInvalido),
+    'sobrou regra bloqueante');
+});
+
+test('o reparo das validações roda uma vez só', () => {
+  const { api, cfg } = montar();
+  const tarefas = api._ambiente._abas.get('Tarefas');
+  const antes = tarefas._validacoes.length;
+  for (let i = 0; i < 4; i++) estado(api, cfg.codigoFilha);
+  assert.equal(tarefas._validacoes.length, antes,
+    'as validações estão sendo reaplicadas a cada requisição');
+});
