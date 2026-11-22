@@ -491,3 +491,112 @@ test('desativar tarefa para de gerar mas mantém o histórico', () => {
   e = estado(api, cfg.codigoPai);
   assert.equal(e.tarefas.find(t => t.id === alvo.id).ativa, false);
 });
+
+// ------------------------------------------------- os dois bugs de produção
+test('a planilha guarda data como Date, e o código lida com isso', () => {
+  const { api, cfg, hoje } = montar();
+  estado(api, cfg.codigoFilha);
+
+  // A célula crua é mesmo um Date — se um dia o Sheets parar de converter,
+  // este teste avisa que a defesa virou desnecessária.
+  const aba = api._ambiente._abas.get('Ocorrencias');
+  const colData = api.ABAS.Ocorrencias.indexOf('data');
+  assert.ok(aba._linhas[1][colData] instanceof Date,
+    'a planilha falsa deveria estar guardando Date');
+
+  // E mesmo assim a leitura devolve texto comparável.
+  const o = api.ler('Ocorrencias')[0];
+  assert.equal(typeof o.data, 'string');
+  assert.match(o.data, /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(o.data, hoje, 'o dia voltou trocado');
+
+  // E o estado que vai para a tela também.
+  const e = estado(api, cfg.codigoFilha);
+  assert.ok(e.ocorrencias.length > 0);
+  assert.ok(e.ocorrencias.every(x => /^\d{4}-\d{2}-\d{2}$/.test(x.data)),
+    'alguma ocorrência foi para a tela com data que não é texto');
+  assert.ok(e.ocorrencias.some(x => x.data === e.hoje),
+    'nenhuma tarefa de hoje — é exatamente o sintoma de "não aparece nada para ela"');
+});
+
+test('planilha criada por versão antiga ganha as colunas que faltam', () => {
+  const { criarAmbiente } = require('./apps-script-falso');
+  const api = criarAmbiente();
+  const planilha = api._ambiente.SpreadsheetApp.getActive();
+
+  // Como era antes: Ocorrencias sem 'periodo', Tarefas sem 'criada_em'.
+  const antigoOc = api.ABAS.Ocorrencias.filter(c => c !== 'periodo');
+  const antigoTf = api.ABAS.Tarefas.filter(c => c !== 'criada_em');
+  planilha.insertSheet('Ocorrencias')
+    .getRange(1, 1, 1, antigoOc.length).setValues([antigoOc]);
+  planilha.insertSheet('Tarefas')
+    .getRange(1, 1, 1, antigoTf.length).setValues([antigoTf]);
+
+  api.instalar();
+
+  const cab = n => api._ambiente._abas.get(n)._linhas[0].map(String);
+  assert.ok(cab('Ocorrencias').includes('periodo'), 'não acrescentou periodo');
+  assert.ok(cab('Tarefas').includes('criada_em'), 'não acrescentou criada_em');
+  // As colunas antigas não podem ter mudado de lugar: os dados ficariam tortos.
+  assert.deepEqual(cab('Ocorrencias').slice(0, antigoOc.length), antigoOc);
+  assert.deepEqual(cab('Tarefas').slice(0, antigoTf.length), antigoTf);
+
+  // E depois do conserto tudo funciona.
+  const cfg = api.config();
+  const e = estado(api, cfg.codigoFilha);
+  assert.ok(e.ocorrencias.some(o => o.data === e.hoje), 'continuou sem tarefas de hoje');
+  assert.ok(e.ocorrencias.every(o => o.periodo), 'ocorrência sem periodo');
+});
+
+test('escrever usa o cabeçalho real, não a ordem de ABAS', () => {
+  const { criarAmbiente } = require('./apps-script-falso');
+  const api = criarAmbiente();
+  const planilha = api._ambiente.SpreadsheetApp.getActive();
+  // Cabeçalho na ordem trocada, como ficaria depois de um conserto.
+  const trocado = api.ABAS.Tarefas.filter(c => c !== 'criada_em').concat('criada_em');
+  planilha.insertSheet('Tarefas').getRange(1, 1, 1, trocado.length).setValues([trocado]);
+  api.instalar();
+
+  const cfg = api.config();
+  const antes = api.ler('Tarefas')[0];
+  api.escrever('Tarefas', antes._linha, 'pontos', 77);
+  const depois = api.ler('Tarefas')[0];
+  assert.equal(Number(depois.pontos), 77, 'escreveu na coluna errada');
+  assert.equal(depois.titulo, antes.titulo, 'atropelou outra coluna');
+});
+
+test('consertar() limpa ocorrências repetidas e guarda a mais adiantada', () => {
+  const { api, cfg, hoje } = montar();
+  estado(api, cfg.codigoFilha);
+  const originais = api.ler('Ocorrencias');
+  assert.ok(originais.length > 0);
+
+  // Reproduz a bagunça: o gerador rodando de novo sem reconhecer o que já existe.
+  const uma = originais[0];
+  for (let i = 0; i < 3; i++) {
+    api.anexar('Ocorrencias', {
+      id: 'dup-' + i, data: hoje, tarefa_id: uma.tarefa_id, titulo: uma.titulo,
+      icone: uma.icone, pontos: uma.pontos, tipo: uma.tipo, periodo: uma.periodo,
+      conta_mesada: 'sim', precisa_aprovacao: 'nao', status: 'pendente',
+    });
+  }
+  // uma das cópias está aprovada: é essa que tem de sobreviver
+  const copias = api.ler('Ocorrencias').filter(o => o.tarefa_id === uma.tarefa_id);
+  api.escrever('Ocorrencias', copias[copias.length - 1]._linha, 'status', 'aprovada');
+
+  assert.match(api.diagnostico(), /repetidas — rode Consertar/);
+  const msg = api.consertar();
+  assert.match(msg, /3 repetidas removidas/);
+
+  const depois = api.ler('Ocorrencias').filter(o => o.tarefa_id === uma.tarefa_id);
+  assert.equal(depois.length, 1, 'sobrou mais de uma');
+  assert.equal(depois[0].status, 'aprovada', 'jogou fora a que estava feita');
+  assert.equal(api.ler('Ocorrencias').length, originais.length);
+  assert.match(api.diagnostico(), /sem repetidas/);
+});
+
+test('diagnóstico aponta o dia vazio, que é o sintoma reclamado', () => {
+  const { api, cfg } = montar();
+  estado(api, cfg.codigoFilha);
+  assert.match(api.diagnostico(), /De hoje \(\d{4}-\d{2}-\d{2}\): [1-9]/);
+});

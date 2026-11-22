@@ -170,6 +170,32 @@ function saldoDe(extrato) {
 function ss() { return SpreadsheetApp.getActive(); }
 
 /**
+ * Colunas que o Google Sheets converte sozinho em data.
+ *
+ * Escrever "2026-11-23" numa célula faz a planilha guardar um valor de data, e
+ * na leitura volta um objeto Date — String(date) vira "Mon Nov 23 2026 ..." e
+ * nunca é igual a "2026-11-23". Tudo que compara dia por igualdade quebra em
+ * silêncio. Então toda leitura passa por aqui e vira texto de novo.
+ *
+ * 'dias' entra na lista porque, em tarefa avulsa, ele guarda uma data.
+ */
+var COLUNAS_DATA = {
+  Ocorrencias: { data: 'dia', marcada_em: 'instante', decidida_em: 'instante' },
+  Extrato:     { quando: 'instante' },
+  Resgates:    { quando: 'instante', decidido_em: 'instante' },
+  Tarefas:     { criada_em: 'dia', dias: 'dia' },
+  Semanas:     { semana: 'dia' }
+};
+
+function comoTexto(valor, tipo) {
+  if (valor instanceof Date) {
+    return Utilities.formatDate(valor, ss().getSpreadsheetTimeZone(),
+      tipo === 'instante' ? 'yyyy-MM-dd HH:mm' : 'yyyy-MM-dd');
+  }
+  return String(valor === null || valor === undefined ? '' : valor).trim();
+}
+
+/**
  * Procura a aba percorrendo getSheets() em vez de usar getSheetByName().
  * São 8 abas, o custo é irrelevante, e getSheetByName() se mostrou capaz de
  * falhar em planilha recém-criada ("Planilha 0 não encontrada").
@@ -193,27 +219,54 @@ function ler(nome) {
   var s = aba(nome);
   var v = s.getDataRange().getValues();
   if (v.length < 2) return [];
-  var cab = v[0];
+  var cab = v[0].map(function (c) { return String(c).trim(); });
+  var datas = COLUNAS_DATA[nome] || {};
   var saida = [];
   for (var i = 1; i < v.length; i++) {
     if (v[i].join('') === '') continue;
     var o = {};
-    for (var j = 0; j < cab.length; j++) o[cab[j]] = v[i][j];
+    for (var j = 0; j < cab.length; j++) {
+      o[cab[j]] = datas[cab[j]] ? comoTexto(v[i][j], datas[cab[j]]) : v[i][j];
+    }
     o._linha = i + 1;
     saida.push(o);
   }
   return saida;
 }
 
+/**
+ * Cabeçalho real da aba, não o que ABAS diz que deveria ser.
+ *
+ * Importa porque a planilha de alguém pode ter sido criada com uma versão
+ * anterior, sem as colunas que eu acrescentei depois. Escrever pela posição
+ * de ABAS nesse caso joga valor na coluna errada, silenciosamente.
+ */
+var _cabecalhos = {};
+
+function cabecalho(nome) {
+  if (_cabecalhos[nome]) return _cabecalhos[nome];
+  var s = aba(nome);
+  var largura = s.getLastColumn();
+  var cols = largura > 0
+    ? s.getRange(1, 1, 1, largura).getValues()[0].map(function (c) { return String(c).trim(); })
+    : [];
+  while (cols.length && cols[cols.length - 1] === '') cols.pop();
+  _cabecalhos[nome] = cols.length ? cols : ABAS[nome].slice();
+  return _cabecalhos[nome];
+}
+
 function anexar(nome, objeto) {
-  var cols = ABAS[nome];
+  var cols = cabecalho(nome);
   aba(nome).appendRow(cols.map(function (c) {
     return objeto[c] === undefined || objeto[c] === null ? '' : objeto[c];
   }));
 }
 
 function escrever(nome, linha, campo, valor) {
-  var col = ABAS[nome].indexOf(campo) + 1;
+  var col = cabecalho(nome).indexOf(campo) + 1;
+  if (col < 1) {
+    throw new Error('a aba ' + nome + ' não tem a coluna ' + campo + ' — rode instalar()');
+  }
   aba(nome).getRange(linha, col).setValue(valor);
 }
 
@@ -855,8 +908,26 @@ function instalar() {
     if (s.getLastRow() === 0) {
       s.getRange(1, 1, 1, ABAS[nome].length).setValues([ABAS[nome]]).setFontWeight('bold');
       s.setFrozenRows(1);
+      return;
+    }
+
+    // Aba criada por uma versão anterior: acrescenta as colunas que faltam.
+    // Sempre no fim, nunca reordenando — mexer na ordem deslocaria os dados
+    // que já estão lá.
+    var largura = s.getLastColumn();
+    var atual = largura > 0
+      ? s.getRange(1, 1, 1, largura).getValues()[0].map(function (c) { return String(c).trim(); })
+      : [];
+    while (atual.length && atual[atual.length - 1] === '') atual.pop();
+
+    var faltando = ABAS[nome].filter(function (c) { return atual.indexOf(c) < 0; });
+    if (faltando.length) {
+      s.getRange(1, atual.length + 1, 1, faltando.length)
+        .setValues([faltando]).setFontWeight('bold');
     }
   });
+
+  _cabecalhos = {};   // os cabeçalhos mudaram
 
   listasSuspensas(existentes);
 
@@ -1023,6 +1094,58 @@ function listasSuspensas(existentes) {
 }
 
 /**
+ * Remove ocorrências repetidas da mesma tarefa no mesmo dia.
+ *
+ * Existiu um período em que a data voltava da planilha como valor de data, e
+ * não como texto: a chave anti-duplicata nunca batia e cada abertura do app
+ * gerava o dia inteiro de novo. Isto limpa a bagunça sem perder o que foi
+ * feito — entre as repetidas, fica a mais adiantada.
+ */
+var PESO_STATUS = { aprovada: 5, marcada: 4, recusada: 3, pendente: 2, expirada: 1 };
+
+function consertar() {
+  var s = aba('Ocorrencias');
+  var v = s.getDataRange().getValues();
+  if (v.length < 2) return 'Nada a consertar: não há ocorrências.';
+
+  var cab = v[0].map(function (c) { return String(c).trim(); });
+  var iData = cab.indexOf('data');
+  var iTarefa = cab.indexOf('tarefa_id');
+  var iStatus = cab.indexOf('status');
+  if (iData < 0 || iTarefa < 0 || iStatus < 0) {
+    return 'A aba Ocorrencias está sem as colunas esperadas — rode instalar().';
+  }
+
+  var melhores = {};
+  for (var i = 1; i < v.length; i++) {
+    if (v[i].join('') === '') continue;
+    var chave = String(v[i][iTarefa]) + '|' + comoTexto(v[i][iData], 'dia');
+    var peso = PESO_STATUS[String(v[i][iStatus]).trim()] || 0;
+    if (!melhores[chave] || peso > melhores[chave].peso) {
+      melhores[chave] = { peso: peso, linha: v[i] };
+    }
+  }
+
+  var ficam = Object.keys(melhores).map(function (k) { return melhores[k].linha; });
+  var removidas = (v.length - 1) - ficam.length;
+  if (removidas <= 0) return 'Nada repetido: ' + ficam.length + ' ocorrências.';
+
+  s.deleteRows(2, v.length - 1);
+  if (ficam.length) {
+    s.getRange(2, 1, ficam.length, cab.length).setValues(ficam.map(function (l) {
+      var linha = l.slice(0, cab.length);
+      while (linha.length < cab.length) linha.push('');
+      return linha;
+    }));
+  }
+
+  var msg = removidas + ' repetidas removidas. Sobraram ' + ficam.length + '.';
+  Logger.log(msg);
+  try { SpreadsheetApp.getUi().alert(msg); } catch (e) {}
+  return msg;
+}
+
+/**
  * Rode isto se instalar() falhar: diz exatamente o que o script está enxergando.
  * O resultado aparece no registro de execução (Ctrl+Enter no editor).
  */
@@ -1048,6 +1171,22 @@ function diagnostico() {
       return !procurarAba(planilha, n);
     });
     linhas.push(faltando.length ? 'Faltam: ' + faltando.join(', ') : 'Todas as abas existem.');
+
+    if (!faltando.length) {
+      var ocs = ler('Ocorrencias');
+      var vistas = {};
+      var repetidas = 0;
+      ocs.forEach(function (o) {
+        var chave = o.tarefa_id + '|' + o.data;
+        if (vistas[chave]) repetidas++; else vistas[chave] = true;
+      });
+      linhas.push('Ocorrências: ' + ocs.length +
+        (repetidas ? ' (' + repetidas + ' repetidas — rode Consertar)' : ' (sem repetidas)'));
+      var hoje = hojeLocal(config());
+      var deHoje = ocs.filter(function (o) { return o.data === hoje; }).length;
+      linhas.push('De hoje (' + hoje + '): ' + deHoje +
+        (deHoje ? '' : ' — é por isso que não aparece nada para ela'));
+    }
   }
 
   var texto = linhas.join('\n');
@@ -1063,6 +1202,7 @@ function onOpen() {
       .addItem('Instalar / conferir abas', 'instalar')
       .addItem('Gerar dias de hoje', 'gerarAgora')
       .addItem('Ver códigos de acesso', 'verCodigos')
+      .addItem('Consertar ocorrências repetidas', 'consertar')
       .addItem('Diagnóstico', 'diagnostico')
       .addToUi();
   } catch (e) {}

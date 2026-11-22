@@ -4,7 +4,46 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-function criarAba(nome) {
+// O Google Sheets converte sozinho o que parece data. Escrever a string
+// "2026-11-23" numa célula devolve um objeto Date na leitura, e
+// String(date) nunca é igual a "2026-11-23". A planilha falsa precisa
+// mentir igual, senão o teste passa e o app quebra.
+//
+// E o Date criado é a meia-noite NO FUSO DA PLANILHA, não no fuso de quem
+// está rodando — detalhe que decide se o dia volta certo ou um dia atrás.
+function partesEm(d, tz) {
+  const o = {};
+  new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(d).forEach(p => { o[p.type] = Number(p.value); });
+  return o;
+}
+
+function instanteNoFuso(y, mo, d, h, mi, tz) {
+  const alvo = Date.UTC(y, mo - 1, d, h, mi);
+  let t = alvo;
+  for (let i = 0; i < 3; i++) {
+    const p = partesEm(new Date(t), tz);
+    const obtido = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute);
+    if (obtido === alvo) break;
+    t += alvo - obtido;
+  }
+  return new Date(t);
+}
+
+function fabricarComoSheets(tz) {
+  return v => {
+    if (typeof v !== 'string') return v;
+    let m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+    if (m) return instanteNoFuso(+m[1], +m[2], +m[3], 0, 0, tz);
+    m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/.exec(v);
+    if (m) return instanteNoFuso(+m[1], +m[2], +m[3], +m[4], +m[5], tz);
+    return v;
+  };
+}
+
+function criarAba(nome, comoSheets) {
   const linhas = [];
   const validacoes = [];
   const faixa = (r, c, nr, nc) => ({
@@ -13,7 +52,7 @@ function criarAba(nome) {
         const alvo = r - 1 + i;
         while (linhas.length <= alvo) linhas.push([]);
         const linha = linhas[alvo];
-        for (let j = 0; j < vals[i].length; j++) linha[c - 1 + j] = vals[i][j];
+        for (let j = 0; j < vals[i].length; j++) linha[c - 1 + j] = comoSheets(vals[i][j]);
       }
       return this;
     },
@@ -32,8 +71,10 @@ function criarAba(nome) {
     _validacoes: validacoes,
     getName: () => nome,
     getLastRow: () => linhas.length,
+    getLastColumn: () => linhas.reduce((m, l) => Math.max(m, l.length), 0),
     setFrozenRows() { return this; },
-    appendRow(arr) { linhas.push(arr.slice()); return this; },
+    appendRow(arr) { linhas.push(arr.map(comoSheets)); return this; },
+    deleteRows(inicio, quantidade) { linhas.splice(inicio - 1, quantidade); return this; },
     getRange(r, c, nr, nc) { return faixa(r, c, nr ?? 1, nc ?? 1); },
     getDataRange() {
       const largura = linhas.reduce((m, l) => Math.max(m, l.length), 0);
@@ -49,18 +90,20 @@ function criarAba(nome) {
 }
 
 function criarAmbiente({ fuso = 'America/Sao_Paulo' } = {}) {
+  const comoSheets = fabricarComoSheets(fuso);
   const abas = new Map();
   // Planilha nova de verdade vem com a aba padrão.
-  abas.set('Página1', criarAba('Página1'));
+  abas.set('Página1', criarAba('Página1', comoSheets));
 
   const planilha = {
     getName: () => 'Planilha sem título',
+    getSpreadsheetTimeZone: () => fuso,
     getUrl: () => 'https://docs.google.com/spreadsheets/d/falsa/edit',
     // Reproduz o erro que apareceu em produção: numa planilha recém-criada,
     // getSheetByName() estourou "Planilha 0 não encontrada". O código não pode
     // mais depender dela — se voltar a usar, os testes quebram aqui.
     getSheetByName() { throw new Error('Planilha 0 não encontrada'); },
-    insertSheet(n) { const a = criarAba(n); abas.set(n, a); return a; },
+    insertSheet(n) { const a = criarAba(n, comoSheets); abas.set(n, a); return a; },
     getSheets: () => [...abas.values()],
     deleteSheet(a) { abas.delete(a.getName()); },
   };
@@ -124,7 +167,7 @@ function criarAmbiente({ fuso = 'America/Sao_Paulo' } = {}) {
   const criar = new Function(...nomes, fonte + `
     return { instalar, doPost, doGet, config, ler, garantirDias, hojeLocal,
              inicioDaSemana, somarDias, escrever, anexar, saldoDe, diagnostico,
-             procurarAba, ABAS };
+             procurarAba, consertar, ABAS };
   `);
   const api = criar(...nomes.map(n => ambiente[n]));
 
