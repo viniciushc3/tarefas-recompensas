@@ -60,6 +60,36 @@ body[data-papel="filha"] .tit{font-size:1.02rem}
 body[data-papel="filha"] .box{border-radius:12px}
 body[data-papel="filha"] .saldo{border-radius:24px}
 
+/* Escuro fofo: ameixa e lilás em vez de cinza-chumbo. Mesma delicadeza do
+   claro, para quem prefere tela escura à noite. */
+body[data-papel="filha"][data-tema="escuro"]{
+  color-scheme: dark;
+  --bg:#17101f; --card:#221831; --card2:#2d2142; --text:#f7eefc; --muted:#a995b8;
+  --line:rgba(255,255,255,.09);
+  --accent:#ff8ec7; --accent2:#cb9bff; --accent-soft:rgba(255,142,199,.17);
+  --cofre:#7ad3e8; --cofre-soft:rgba(122,211,232,.15);
+  --ok:#6fdfa7; --ok-soft:rgba(111,223,167,.15);
+  --warn:#ffce6a; --warn-soft:rgba(255,206,106,.15);
+  --bad:#ff8da0; --bad-soft:rgba(255,141,160,.15);
+  background:
+    radial-gradient(880px 420px at 92% -10%, rgba(255,142,199,.20) 0%, transparent 62%),
+    radial-gradient(720px 380px at -12% 4%, rgba(166,120,255,.18) 0%, transparent 58%),
+    radial-gradient(520px 320px at 50% 108%, rgba(122,211,232,.13) 0%, transparent 60%),
+    var(--bg);
+  background-attachment: fixed;
+}
+body[data-papel="filha"][data-tema="escuro"] header{
+  background:rgba(23,16,31,.82); border-bottom-color:rgba(255,255,255,.07);
+}
+body[data-papel="filha"][data-tema="escuro"] nav{
+  background:rgba(45,33,66,.88); box-shadow:0 10px 34px rgba(0,0,0,.45);
+}
+body[data-papel="filha"][data-tema="escuro"] .card,
+body[data-papel="filha"][data-tema="escuro"] .tarefa{box-shadow:none}
+body[data-papel="filha"][data-tema="escuro"] #toast{
+  background:var(--card2); color:var(--text); box-shadow:0 10px 30px rgba(0,0,0,.5);
+}
+
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;background:var(--bg);color:var(--text);
   font:15px/1.45 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
@@ -216,8 +246,7 @@ body.sem-codigo #entrar{display:block}
 body.sem-codigo header,body.sem-codigo main,body.sem-codigo nav{display:none}
 #entrar .em{font-size:52px}
 #entrar h1{font-size:1.6rem;margin:10px 0 6px}
-.codigo{text-transform:uppercase;letter-spacing:.3em;text-align:center;font-size:1.3rem;
-  font-weight:800}
+.codigo{letter-spacing:.14em;text-align:center;font-size:1.25rem;font-weight:800}
 .view{display:none}
 .view.on{display:block}
 </style>
@@ -234,7 +263,7 @@ body.sem-codigo header,body.sem-codigo main,body.sem-codigo nav{display:none}
   </div>
   <div class="campo">
     <label>Código de acesso</label>
-    <input id="inCodigo" class="codigo" placeholder="ABCD2345" maxlength="12" autocapitalize="characters" autocomplete="off" spellcheck="false">
+    <input id="inCodigo" class="codigo" placeholder="sua senha" maxlength="40" autocapitalize="none" autocomplete="off" spellcheck="false">
   </div>
   <div class="campo"><button class="bt" id="btEntrar">Entrar</button></div>
   <p class="muted xs" id="entrarErro"></p>
@@ -346,9 +375,26 @@ function rotuloDia(iso, hoje) {
 }
 
 // ------------------------------------------------------- estado local
-const CONF = 'tr.conf', CACHE = 'tr.cache', FILA = 'tr.fila', ABA = 'tr.aba';
+const CONF = 'tr.conf', CACHE = 'tr.cache', FILA = 'tr.fila', ABA = 'tr.aba',
+      TEMA = 'tr.tema';
 
 let conf = recuperar(CONF, {});
+
+/**
+ * Senha embutida no link: .../#c=lili
+ *
+ * É o que faz "abrir o link já entrar" sem deixar o sistema aberto para
+ * qualquer um: o link público não tem a senha; o que o pai manda para o
+ * celular dela, tem. Depois de guardada, some da barra de endereço — não
+ * adianta deixar à mostra no histórico do navegador.
+ */
+(function () {
+  const doLink = new URLSearchParams(location.hash.replace(/^#/, '')).get('c');
+  if (!doLink) return;
+  conf = Object.assign({}, conf, { codigo: doLink.trim() });
+  guardar(CONF, conf);
+  try { history.replaceState(null, '', location.pathname + location.search); } catch {}
+})();
 let est = recuperar(CACHE, null);     // último estado vindo da planilha
 let fila = recuperar(FILA, []);       // ações ainda não confirmadas
 let aba = 'hoje';
@@ -690,7 +736,7 @@ function sair(msg) {
 
 $('#btEntrar').addEventListener('click', async () => {
   const url = $('#inUrl').value.trim() || conf.url || API_URL;
-  const codigo = $('#inCodigo').value.trim().toUpperCase();
+  const codigo = $('#inCodigo').value.trim();
   if (!url) { $('#entrarErro').textContent = 'Falta o endereço do app da planilha.'; return; }
   if (!codigo) { $('#entrarErro').textContent = 'Falta o código.'; return; }
 
@@ -732,7 +778,9 @@ function render() {
   if (!est) return;
   const papel = est.papel;
   document.body.dataset.papel = papel;
-  const cor = papel === 'filha' ? '#fff7fb' : '#0b0d13';
+  const tema = papel === 'filha' ? recuperar(TEMA, 'claro') : 'claro';
+  document.body.dataset.tema = tema;
+  const cor = papel !== 'filha' ? '#0b0d13' : tema === 'escuro' ? '#17101f' : '#fff7fb';
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta && meta.content !== cor) meta.content = cor;
 
@@ -1069,7 +1117,19 @@ const ROTULO_TIPO = {
 };
 
 function telaExtrato(el) {
-  let html = `<div class="saldos">
+  const tema = recuperar(TEMA, 'claro');
+  let html = est.papel === 'filha' ? `
+    <div class="card" style="margin-bottom:16px">
+      <div class="between">
+        <b>Tema</b>
+        <div class="ops">
+          <button class="op ${tema === 'claro' ? 'on' : ''}" data-tema="claro">☀️ Claro</button>
+          <button class="op ${tema === 'escuro' ? 'on' : ''}" data-tema="escuro">🌙 Escuro</button>
+        </div>
+      </div>
+    </div>` : '';
+
+  html += `<div class="saldos">
     <div class="saldo g"><div class="rot">GASTÁVEL</div><div class="val">${est.saldo.gastavel}</div></div>
     <div class="saldo c"><div class="rot">COFRINHO</div><div class="val">${est.saldo.cofrinho}</div></div>
   </div>`;
@@ -1094,6 +1154,10 @@ function telaExtrato(el) {
       </div></div>`).join('');
   }
   el.innerHTML = html;
+
+  el.querySelectorAll('[data-tema]').forEach(b => {
+    b.onclick = () => { guardar(TEMA, b.dataset.tema); render(); };
+  });
 }
 
 // ---------------------------------------------------------------- Fila
@@ -1150,8 +1214,9 @@ function telaFila(el) {
       ${est.streak > 0 ? `<span class="chip warn">🔥 ${est.streak}</span>` : ''}
     </div></div>`;
 
+  let blocoHoje = '';
   if (doDia.length) {
-    html += `<h2>Hoje · ${feitas} de ${doDia.length}</h2>
+    blocoHoje = `<h2>Hoje · ${feitas} de ${doDia.length}</h2>
       <div class="card">
         <div class="barra v" style="margin-bottom:10px">
           <div style="width:${(feitas / doDia.length) * 100}%"></div></div>
@@ -1240,7 +1305,8 @@ function telaFila(el) {
       </div></div>`).join('');
   }
 
-  el.innerHTML = html;
+  // O que espera você fica no topo; o resumo do dia é contexto, vem depois.
+  el.innerHTML = html + blocoHoje;
 
   const decidir = (sel, acao, aprovar, pergunta) => {
     el.querySelectorAll(`[${sel}]`).forEach(b => {
@@ -1613,6 +1679,12 @@ function lerCampos(el) {
 }
 
 // ------------------------------------------------------------- Ajustes
+/** Link que já entra: a senha vai no fragmento, que não é enviado a servidor. */
+function linkDaFilha() {
+  if (!est.codigoFilha) return '';
+  return location.origin + location.pathname + '#c=' + encodeURIComponent(est.codigoFilha);
+}
+
 function telaAjustes(el) {
   el.innerHTML = `
     <div class="card">
@@ -1623,6 +1695,18 @@ function telaAjustes(el) {
       ${est.planilha ? `<a href="${esc(est.planilha)}" target="_blank" rel="noopener"
         class="bt" style="display:block;text-align:center;text-decoration:none">
         Abrir a planilha</a>` : ''}
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0">O acesso dela</h2>
+      <p class="muted sm">Mande este link para o celular dela. Ao abrir, ela entra
+      direto e não digita nada — nem agora, nem depois. O link público do site
+      continua pedindo a senha.</p>
+      <div class="campo"><input id="linkDela" readonly value="${esc(linkDaFilha())}"></div>
+      <div class="campo"><button class="bt" id="btCopiar">Copiar o link dela</button></div>
+      <p class="muted xs">Senha dela: <b>${esc(est.codigoFilha || '—')}</b>.
+      Para trocar por algo simples, edite <b>codigo_filha</b> na aba Config da
+      planilha; maiúscula e minúscula não fazem diferença.</p>
     </div>
 
     <div class="card">
@@ -1662,6 +1746,21 @@ function telaAjustes(el) {
     $('#ajG').value = ''; $('#ajC').value = ''; $('#ajM').value = '';
     toast('Lançando…');
   };
+  const btCopiar = $('#btCopiar');
+  if (btCopiar) {
+    btCopiar.onclick = async () => {
+      const campo = $('#linkDela');
+      try {
+        await navigator.clipboard.writeText(campo.value);
+        toast('Link copiado ✓');
+      } catch {
+        // Sem permissão de área de transferência: seleciona para copiar à mão.
+        campo.select();
+        toast('Toque e segure para copiar');
+      }
+    };
+  }
+
   $('#btAtualizar').onclick = () => sincronizar();
   $('#btSair').onclick = () => {
     if (confirm('Sair? Você vai precisar do código de acesso para entrar de novo.')) sair();

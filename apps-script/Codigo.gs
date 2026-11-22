@@ -399,10 +399,15 @@ function novoId(prefixo) {
 
 /** O código de acesso define quem está falando. Sem código, nada acontece. */
 function quem(codigo, cfg) {
-  codigo = String(codigo || '').trim();
-  if (!codigo) throw new Error('codigo');
-  if (cfg.codigoPai && codigo === cfg.codigoPai) return { papel: 'pai', nome: cfg.nomePai };
-  if (cfg.codigoFilha && codigo === cfg.codigoFilha) return { papel: 'filha', nome: cfg.nomeFilha };
+  // Sem diferenciar maiúscula de minúscula: o código pode ser uma senha
+  // simples escolhida à mão na aba Config, e ninguém quer errar por causa
+  // do teclado do celular.
+  var dado = String(codigo || '').trim().toLowerCase();
+  if (!dado) throw new Error('codigo');
+  var pai = String(cfg.codigoPai || '').trim().toLowerCase();
+  var filha = String(cfg.codigoFilha || '').trim().toLowerCase();
+  if (pai && dado === pai) return { papel: 'pai', nome: cfg.nomePai };
+  if (filha && dado === filha) return { papel: 'filha', nome: cfg.nomeFilha };
   throw new Error('codigo');
 }
 
@@ -685,6 +690,9 @@ function montarEstado(pessoa, cfg) {
     // O painel de administração é a própria planilha: tarefas, preços e faixas
     // se editam lá, não numa tela que eu teria de construir e você manter.
     planilha: ePai ? ss().getUrl() : '',
+    // Para o pai montar o link de acesso dela. Ele já tem acesso a tudo,
+    // então saber o código dela não abre nada novo.
+    codigoFilha: ePai ? String(cfg.codigoFilha || '') : '',
     hoje: hoje,
     semana: semana,
     cfg: {
@@ -1225,12 +1233,28 @@ function comTrava(fn) {
 function tratar(entrada) {
   var cfg = config();
   var pessoa = quem(entrada.codigo, cfg);
+  var acoes = entrada.acoes || [];
+
+  // Pedido só de imagem: devolve a imagem e mais nada.
+  //
+  // Montar a tela inteira custa seis a oito leituras da planilha. Fazer isso
+  // para buscar uma foto é o que deixava a foto demorando a aparecer.
+  var soFoto = acoes.length > 0 && acoes.every(function (a) { return a.acao === 'foto'; });
+  if (soFoto) {
+    return {
+      versao: VERSAO,
+      somenteFoto: true,
+      resultados: acoes.map(function (a) {
+        try { return { ref: a.ref, ok: true, dados: acaoFoto(pessoa, cfg, a) }; }
+        catch (err) { return { ref: a.ref, ok: false, erro: String(err.message || err) }; }
+      })
+    };
+  }
 
   // A página manda uma lista de ações pendentes de uma vez (ela pode ter
   // marcado três tarefas offline). Cada uma responde separadamente, para um
   // erro de regra numa não derrubar as outras.
   var resultados = [];
-  var acoes = entrada.acoes || [];
   for (var i = 0; i < acoes.length; i++) {
     var a = acoes[i];
     var fn = ACOES[a.acao];

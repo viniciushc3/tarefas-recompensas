@@ -46,8 +46,14 @@ async function abrir(pagina, base, codigo) {
   pagina.on('pageerror', e => erros.push(String(e)));
   pagina.on('console', m => { if (m.type() === 'error') erros.push(m.text()); });
   // Aponta para a planilha de mentira; em produção vem da constante API_URL.
-  await pagina.addInitScript(
-    url => localStorage.setItem('tr.conf', JSON.stringify({ url })), base + '/api');
+  // Sem mesclar, o script rodaria de novo a cada navegação e apagaria a
+  // sessão guardada — derrubando a página no meio do teste.
+  await pagina.addInitScript(url => {
+    let atual = {};
+    try { atual = JSON.parse(localStorage.getItem('tr.conf') || '{}'); } catch {}
+    atual.url = url;
+    localStorage.setItem('tr.conf', JSON.stringify(atual));
+  }, base + '/api');
   await pagina.goto(base, { waitUntil: 'domcontentloaded' });
   await pagina.fill('#inCodigo', codigo);
   await pagina.click('#btEntrar');
@@ -175,8 +181,12 @@ test('código errado não entra', async (t) => {
   t.after(async () => { await navegador.close(); servidor.close(); });
 
   const pagina = await navegador.newPage();
-  await pagina.addInitScript(
-    url => localStorage.setItem('tr.conf', JSON.stringify({ url })), base + '/api');
+  await pagina.addInitScript(u => {
+    let atual = {};
+    try { atual = JSON.parse(localStorage.getItem('tr.conf') || '{}'); } catch {}
+    atual.url = u;
+    localStorage.setItem('tr.conf', JSON.stringify(atual));
+  }, base + '/api');
   await pagina.goto(base, { waitUntil: 'domcontentloaded' });
   await pagina.fill('#inCodigo', 'ZZZZZZZZ');
   await pagina.click('#btEntrar');
@@ -463,4 +473,89 @@ test('a tela do pai continua no tema escuro', async (t) => {
   const fundo = await p.evaluate(
     () => getComputedStyle(document.body).getPropertyValue('--bg').trim());
   assert.equal(fundo, '#0b0d13');
+});
+
+test('o link com a senha entra direto e some da barra de endereço', async (t) => {
+  const api = criarAmbiente();
+  api.instalar();
+  const cfg = api.config();
+  const servidor = await subirServidor(api);
+  const url = 'http://127.0.0.1:' + servidor.address().port;
+  const navegador = await chromium.launch();
+  t.after(async () => { await navegador.close(); servidor.close(); });
+
+  const ctx = await navegador.newContext({ viewport: { width: 390, height: 844 } });
+  const p = await ctx.newPage();
+  const erros = [];
+  p.on('pageerror', e => erros.push(String(e)));
+  await p.addInitScript(u => {
+    let atual = {};
+    try { atual = JSON.parse(localStorage.getItem('tr.conf') || '{}'); } catch {}
+    atual.url = u;
+    localStorage.setItem('tr.conf', JSON.stringify(atual));
+  }, url + '/api');
+
+  await p.goto(url + '/#c=' + cfg.codigoFilha, { waitUntil: 'domcontentloaded' });
+  await p.waitForSelector('nav button', { state: 'visible', timeout: 15000 });
+
+  assert.match(await p.textContent('#titulo'), /Oi,/, 'não entrou direto');
+  assert.ok(!(await p.locator('#entrar').isVisible()));
+  // A senha não pode ficar à mostra no histórico do navegador.
+  assert.equal(await p.evaluate(() => location.hash), '', 'a senha ficou na barra');
+  assert.deepEqual(erros, []);
+});
+
+test('senha escolhida à mão funciona, com ou sem maiúscula', async (t) => {
+  const api = criarAmbiente();
+  api.instalar();
+  const linha = api.ler('Config').find(c => c.chave === 'codigo_filha');
+  api.escrever('Config', linha._linha, 'valor', 'Lili');
+
+  const servidor = await subirServidor(api);
+  const url = 'http://127.0.0.1:' + servidor.address().port;
+  const navegador = await chromium.launch();
+  t.after(async () => { await navegador.close(); servidor.close(); });
+
+  const p = await navegador.newPage();
+  await p.addInitScript(u => {
+    let atual = {};
+    try { atual = JSON.parse(localStorage.getItem('tr.conf') || '{}'); } catch {}
+    atual.url = u;
+    localStorage.setItem('tr.conf', JSON.stringify(atual));
+  }, url + '/api');
+  await p.goto(url, { waitUntil: 'domcontentloaded' });
+  await p.fill('#inCodigo', 'lili');
+  await p.click('#btEntrar');
+  await p.waitForSelector('nav button', { state: 'visible', timeout: 15000 });
+  assert.match(await p.textContent('#titulo'), /Oi,/);
+});
+
+test('ela escolhe o tema escuro e ele fica guardado', async (t) => {
+  const api = criarAmbiente();
+  api.instalar();
+  const cfg = api.config();
+  const servidor = await subirServidor(api);
+  const url = 'http://127.0.0.1:' + servidor.address().port;
+  const navegador = await chromium.launch();
+  t.after(async () => { await navegador.close(); servidor.close(); });
+
+  const ctx = await navegador.newContext({ viewport: { width: 390, height: 844 } });
+  const p = await ctx.newPage();
+  const erros = await abrir(p, url, cfg.codigoFilha);
+
+  await p.click('nav button:has-text("Extrato")');
+  await p.click('[data-tema="escuro"]');
+  await p.waitForFunction(() => document.body.dataset.tema === 'escuro',
+    null, { timeout: 5000 });
+
+  const fundo = await p.evaluate(
+    () => getComputedStyle(document.body).getPropertyValue('--bg').trim());
+  assert.equal(fundo, '#17101f', 'não trocou para o escuro fofo');
+  assert.equal(await p.getAttribute('meta[name="theme-color"]', 'content'), '#17101f');
+
+  // Sobrevive a recarregar.
+  await p.reload({ waitUntil: 'domcontentloaded' });
+  await p.waitForSelector('nav button', { state: 'visible', timeout: 15000 });
+  assert.equal(await p.getAttribute('body', 'data-tema'), 'escuro', 'esqueceu o tema');
+  assert.deepEqual(erros, []);
 });

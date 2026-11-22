@@ -7,7 +7,7 @@ confere no seu, e as tarefas viram pontos, cofrinho e mesada.
 Sem app para instalar, sem loja, sem servidor. A planilha é o banco de dados
 **e** o seu painel de administração.
 
-- **Como testar:** `./scripts/testar.sh` (101 testes, sem Google e sem rede)
+- **Como testar:** `./scripts/testar.sh` (107 testes, sem Google e sem rede)
 - **As decisões de desenho:** [`docs/regras.md`](docs/regras.md)
 
 ## As três moedas
@@ -151,9 +151,24 @@ marcou.
 
 ## Duas telas, dois temas
 
-A dela é clara e macia; a sua é escura. O escuro é bonito mas tem cara de
-ferramenta, e quem abre aquilo todo dia é uma criança. Tocar no nome, no topo,
-sai da conta — com confirmação, porque voltar exige o código.
+A dela é macia, clara ou escura à escolha dela (aba Extrato); a sua é escura.
+Tocar no nome, no topo, sai da conta — com confirmação, porque voltar exige a
+senha.
+
+## O acesso
+
+O site é público e o endereço do Apps Script está no código dele. **A senha é a
+única coisa entre um estranho e os dados da sua família**, fotos inclusive —
+repositório público é indexado e varrido por robôs.
+
+Por isso ela não some. O que some é o trabalho de digitar:
+
+- a senha pode ser o que você quiser, escolhida em `codigo_pai` e
+  `codigo_filha` na aba Config. Maiúscula não faz diferença
+- o app do pai, em Ajustes, monta um **link que já entra**:
+  `…/#c=senha`. Mande para o celular dela uma vez; ela abre e nunca mais
+  digita nada. O link público continua pedindo senha, e a senha some da barra
+  de endereço assim que é guardada
 
 ## O que o app não faz
 

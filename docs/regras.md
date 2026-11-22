@@ -116,12 +116,15 @@ do que seria num banco de dados.
 
 ## Papéis
 
-O código de acesso define quem é, e **quem confere é o script**, não a página.
+A senha define quem é, e **quem confere é o script**, não a página.
 A filha não aprova tarefa, não ajusta pontos, não fecha semana e não recebe o
 link da planilha — mesmo que mexa no app, que é um arquivo HTML público.
 
 A URL do app da web é pública por necessidade (o celular dela não faz login no
-Google). A barreira é o código: 8 caracteres de um alfabeto de 32.
+Google). A barreira é a senha. A gerada na instalação tem 8 caracteres de um
+alfabeto de 32; trocá-la por algo curto e memorável na aba Config é decisão de
+quem usa, e o link com a senha embutida (`#c=…`) evita ter que digitar sem
+abrir mão dela.
 
 ## Offline, e sincronização invisível
 

@@ -85,3 +85,56 @@ test('o dia não é gerado de novo a cada toque', () => {
   assert.equal(api.ler('Ocorrencias').length, antes,
     'o gerador voltou a duplicar — foi exatamente esse bug que encheu a planilha');
 });
+
+test('buscar uma foto não monta a tela inteira', () => {
+  const api = criarAmbiente();
+  api.instalar();
+  const cfg = api.config();
+  const e = api.chamar({ codigo: cfg.codigoFilha, acoes: [] });
+  const oc = e.ocorrencias.find(o => o.precisa_foto);
+
+  api.chamar({ codigo: cfg.codigoFilha, acoes: [
+    { acao: 'enviarFoto', id: oc.id, dados: Buffer.from('x').toString('base64'),
+      mime: 'image/jpeg', ref: 0 },
+  ]});
+  const comFoto = api.ler('Ocorrencias').find(o => o.id === oc.id).foto;
+
+  const custo = medir(api, () =>
+    api.chamar({ codigo: cfg.codigoPai, acoes: [{ acao: 'foto', foto: comFoto, ref: 0 }] }));
+
+  // Config para achar a pessoa, Ocorrencias para conferir que a foto é nossa.
+  assert.ok(custo.leituras <= 3, 'leituras: ' + custo.leituras);
+  assert.equal(custo.escritas, 0);
+});
+
+test('o pedido de foto não devolve a tela junto', () => {
+  const api = criarAmbiente();
+  api.instalar();
+  const cfg = api.config();
+  const e = api.chamar({ codigo: cfg.codigoFilha, acoes: [] });
+  const oc = e.ocorrencias.find(o => o.precisa_foto);
+  api.chamar({ codigo: cfg.codigoFilha, acoes: [
+    { acao: 'enviarFoto', id: oc.id, dados: Buffer.from('x').toString('base64'), ref: 0 },
+  ]});
+  const comFoto = api.ler('Ocorrencias').find(o => o.id === oc.id).foto;
+
+  const r = api.chamar({ codigo: cfg.codigoPai, acoes: [{ acao: 'foto', foto: comFoto, ref: 0 }] });
+  assert.equal(r.somenteFoto, true);
+  assert.equal(r.ocorrencias, undefined, 'veio a tela inteira junto com a imagem');
+  assert.ok(r.resultados[0].dados.dados);
+});
+
+test('a senha não diferencia maiúscula de minúscula', () => {
+  const api = criarAmbiente();
+  api.instalar();
+  // Como alguém escolheria à mão na aba Config.
+  const linha = api.ler('Config').find(c => c.chave === 'codigo_filha');
+  api.escrever('Config', linha._linha, 'valor', 'Lili');
+
+  ['Lili', 'lili', 'LILI', ' lili '].forEach(tentativa => {
+    const r = api.chamar({ codigo: tentativa, acoes: [] });
+    assert.equal(r.ok, true, 'recusou "' + tentativa + '"');
+    assert.equal(r.papel, 'filha');
+  });
+  assert.equal(api.chamar({ codigo: 'lilo', acoes: [] }).erro, 'codigo');
+});
