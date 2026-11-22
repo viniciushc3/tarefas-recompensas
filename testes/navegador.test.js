@@ -90,7 +90,7 @@ test('a filha marca uma tarefa e o pai a vê na fila', async (t) => {
   // as outras abas dela não podem explodir
   for (const aba of ['Loja', 'Meta', 'Extrato']) {
     await pDela.click(`nav button:has-text("${aba}")`);
-    await pDela.waitForTimeout(250);
+    await pDela.waitForSelector('nav button.on', { timeout: 10000 });
   }
   assert.deepEqual(errosDela, [], 'erro de JS ao navegar nas abas dela');
 
@@ -105,13 +105,15 @@ test('a filha marca uma tarefa e o pai a vê na fila', async (t) => {
   assert.match(fila, /Tarefas aguardando/);
 
   await pSeu.click('[data-oc-sim]');
-  await pSeu.waitForTimeout(1200);
-  assert.doesNotMatch(await pSeu.textContent('#v-fila'), /Lavar a louça/,
-    'a tarefa deveria sair da fila depois de aprovada');
+  // Esperar por condição, não por relógio: com a máquina ocupada, tempo fixo
+  // é a receita de teste que falha uma vez em dez.
+  await pSeu.waitForFunction(
+    () => !document.querySelector('#v-fila').textContent.includes('Lavar a louça'),
+    null, { timeout: 15000 });
 
   for (const aba of ['Semana', 'Extrato', 'Ajustes']) {
     await pSeu.click(`nav button:has-text("${aba}")`);
-    await pSeu.waitForTimeout(250);
+    await pSeu.waitForSelector('nav button.on', { timeout: 10000 });
   }
   assert.deepEqual(errosSeus, [], 'erro de JS ao navegar nas suas abas');
 
@@ -127,10 +129,12 @@ test('a filha marca uma tarefa e o pai a vê na fila', async (t) => {
     'o formulário perdeu o que foi digitado ao trocar de opção');
   assert.equal(await pSeu.inputValue('#f-pontos'), '25');
   await pSeu.click('#btSalvar');
-  await pSeu.waitForTimeout(1500);
-
-  assert.match(await pSeu.textContent('#v-editar'), /Passear com o cachorro/,
-    'a tarefa nova não apareceu na lista');
+  await pSeu.waitForFunction(
+    () => document.querySelector('#v-editar').textContent.includes('Passear com o cachorro'),
+    null, { timeout: 15000 });
+  await pSeu.waitForFunction(
+    () => document.querySelector('#syncSt').textContent === 'Em dia',
+    null, { timeout: 15000 });
   const criada = api.ler('Tarefas').find(t => t.titulo === 'Passear com o cachorro');
   assert.ok(criada, 'a tarefa não chegou na planilha');
   assert.equal(Number(criada.pontos), 25);
@@ -139,9 +143,9 @@ test('a filha marca uma tarefa e o pai a vê na fila', async (t) => {
 
   // e ela aparece no celular dela
   await pDela.click('nav button:has-text("Hoje")');
-  await pDela.waitForTimeout(1500);
-  assert.match(await pDela.textContent('#v-hoje'), /Passear com o cachorro/,
-    'a tarefa nova não chegou no celular dela');
+  await pDela.waitForFunction(
+    () => document.querySelector('#v-hoje').textContent.includes('Passear com o cachorro'),
+    null, { timeout: 15000 });
 
   // o saldo dela subiu os 30 pontos aprovados
   const saldo = api.saldoDe(api.ler('Extrato'));
@@ -212,4 +216,61 @@ test('com a planilha inchada, o toque continua instantâneo', async (t) => {
   // acima disto é a sensação de "ele vai na planilha antes de marcar".
   assert.ok(demora < 400, 'o toque levou ' + demora + 'ms para aparecer na tela');
   console.log('      toque -> visto na tela: ' + demora + 'ms');
+});
+
+test('ela marca, sincroniza e desmarca com um toque', async (t) => {
+  const api = criarAmbiente();
+  api.instalar();
+  const cfg = api.config();
+  const servidor = await subirServidor(api);
+  const url = 'http://127.0.0.1:' + servidor.address().port;
+  const navegador = await chromium.launch();
+  t.after(async () => { await navegador.close(); servidor.close(); });
+
+  const ctx = await navegador.newContext({ viewport: { width: 390, height: 844 } });
+  const p = await ctx.newPage();
+  const erros = await abrir(p, url, cfg.codigoFilha);
+
+  const alvo = p.locator('.tarefa:not([disabled])', { hasText: 'Tirar o lixo' }).first();
+  await alvo.click();
+  await p.waitForSelector('.tarefa.feita', { timeout: 5000 });
+  assert.equal(Number(await p.textContent('[data-saldo="gastavel"]')), 14);
+
+  // Espera chegar na planilha, para o desfazer valer contra dado já gravado.
+  await p.waitForFunction(() => document.querySelector('#syncSt').textContent === 'Em dia',
+    null, { timeout: 15000 });
+  assert.equal(api.ler('Extrato').filter(e => e.tipo === 'ganho').length, 1);
+
+  // Era aqui que o app parecia travado: o cartão feito não respondia a toque.
+  const feita = p.locator('.tarefa.feita', { hasText: 'Tirar o lixo' }).first();
+  assert.match(await p.textContent('#v-hoje'), /Tocar numa tarefa feita desmarca/,
+    'sem a pista, ela não descobre que dá para desfazer');
+
+  const inicio = Date.now();
+  await feita.click();
+  await p.waitForFunction(
+    () => Number(document.querySelector('[data-saldo="gastavel"]').textContent) === 0,
+    null, { timeout: 5000 });
+  const demora = Date.now() - inicio;
+  assert.ok(demora < 400, 'desmarcar levou ' + demora + 'ms na tela');
+
+  await p.waitForFunction(() => document.querySelector('#syncSt').textContent === 'Em dia',
+    null, { timeout: 15000 });
+  assert.deepEqual(api.saldoDe(api.ler('Extrato')), { gastavel: 0, cofrinho: 0 },
+    'a planilha não estornou');
+  assert.equal(
+    api.ler('Ocorrencias').filter(o => o.titulo === 'Tirar o lixo' && o.status === 'aprovada').length,
+    0, 'a ocorrência continuou aprovada na planilha');
+
+  // E dá para marcar de novo, pagando de novo.
+  await p.locator('.tarefa:not([disabled])', { hasText: 'Tirar o lixo' }).first().click();
+  await p.waitForFunction(
+    () => Number(document.querySelector('[data-saldo="gastavel"]').textContent) === 14,
+    null, { timeout: 5000 });
+  await p.waitForFunction(() => document.querySelector('#syncSt').textContent === 'Em dia',
+    null, { timeout: 15000 });
+  assert.deepEqual(api.saldoDe(api.ler('Extrato')), { gastavel: 14, cofrinho: 6 });
+
+  assert.deepEqual(erros, [], 'erro de JS durante marcar/desmarcar');
+  console.log('      desmarcar -> tela: ' + demora + 'ms');
 });

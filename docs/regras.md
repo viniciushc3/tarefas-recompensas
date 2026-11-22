@@ -59,6 +59,12 @@ A **janela de atraso** (2 dias) existe por um motivo prático: ela **vai**
 esquecer de marcar algo que fez. Sem a janela o streak quebra injustamente e o
 app é abandonado no segundo mês.
 
+**Desmarcar** é o mesmo gesto no sentido contrário, dentro da mesma janela, e
+devolve exatamente os pontos que a tarefa pagou (um lançamento de estorno, já
+que o extrato nunca apaga nada). Nenhum dos dois sentidos pede confirmação:
+cada um desfaz o outro. A única recusa é quando os pontos já foram gastos —
+saldo negativo confundiria mais do que ajudaria.
+
 ## Geração dos dias
 
 `garantirDias()` roda a cada chamada e gera um **intervalo** de 14 dias para

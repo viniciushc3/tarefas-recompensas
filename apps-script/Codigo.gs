@@ -351,8 +351,25 @@ function agora(cfg) {
   return Utilities.formatDate(new Date(), cfg.fuso, 'yyyy-MM-dd HH:mm');
 }
 
+/**
+ * Identificador único.
+ *
+ * A versão anterior era milissegundo + um aleatório de 1296 valores. Parece
+ * bastante até lembrar que instalar() cria 19 linhas e garantirDias() até 165,
+ * tudo no mesmo milissegundo: a chance de duas baterem é alta. E colisão aqui
+ * é silenciosa e feia — duas tarefas com o mesmo id fazem a segunda nunca
+ * gerar ocorrência, e duas ocorrências iguais fazem marcar uma marcar a outra.
+ *
+ * O contador garante unicidade dentro de uma execução; o tempo e o aleatório
+ * cuidam de execuções diferentes.
+ */
+var _sequencia = 0;
+
 function novoId(prefixo) {
-  return prefixo + '-' + Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36);
+  _sequencia++;
+  return prefixo + '-' + Date.now().toString(36) +
+    '-' + _sequencia.toString(36) +
+    Math.floor(Math.random() * 1679616).toString(36);
 }
 
 /** O código de acesso define quem está falando. Sem código, nada acontece. */
@@ -652,11 +669,18 @@ function lancar(cfg, tipo, gastavel, cofrinho, motivo, ref) {
 function creditar(cfg, oc) {
   var pontos = Number(oc.pontos) || 0;
   if (pontos <= 0) return;  // tarefa básica: conta para a mesada, não paga
-  // Trava de crédito duplo: uma ocorrência paga no máximo uma vez.
-  var jaPago = ler('Extrato').some(function (e) {
-    return e.tipo === 'ganho' && String(e.ref) === String(oc.id);
+  // Trava de crédito duplo: uma ocorrência paga no máximo uma vez por vez.
+  //
+  // Conta ganhos menos estornos em vez de "existe ganho": sem isso, desmarcar
+  // e marcar de novo deixaria a tarefa sem pagar, porque o ganho antigo ainda
+  // está no extrato (que só cresce, nunca apaga).
+  var saldoDaOcorrencia = 0;
+  ler('Extrato').forEach(function (e) {
+    if (String(e.ref) !== String(oc.id)) return;
+    if (e.tipo === 'ganho') saldoDaOcorrencia++;
+    if (e.tipo === 'estorno') saldoDaOcorrencia--;
   });
-  if (jaPago) return;
+  if (saldoDaOcorrencia > 0) return;
   var d = dividir(pontos, cfg.taxaCofrinho);
   lancar(cfg, 'ganho', d.gastavel, d.cofrinho, oc.titulo, oc.id);
 }
@@ -680,6 +704,53 @@ function acaoMarcar(pessoa, cfg, dados) {
   });
   if (novo === 'aprovada') creditar(cfg, oc);
   return { status: novo };
+}
+
+/**
+ * Desfaz uma marcação.
+ *
+ * Toque errado é garantido com criança, e sem isto a tela simplesmente não
+ * responde — foi o que aconteceu. Marcar e desmarcar são os dois sentidos do
+ * mesmo gesto, então nenhum dos dois pede confirmação: cada um desfaz o outro.
+ */
+function acaoDesmarcar(pessoa, cfg, dados) {
+  var hoje = hojeLocal(cfg);
+  var oc = ler('Ocorrencias').filter(function (o) { return o.id === dados.id; })[0];
+  if (!oc) throw new Error('tarefa não encontrada');
+  if (oc.status !== 'aprovada' && oc.status !== 'marcada') {
+    throw new Error('essa tarefa não está marcada');
+  }
+  var data = String(oc.data);
+  if (data < somarDias(hoje, -cfg.janelaAtraso)) {
+    throw new Error('passou do prazo para mexer nessa tarefa');
+  }
+
+  // Devolve os pontos que esta ocorrência pagou, se pagou.
+  var pagos = { gastavel: 0, cofrinho: 0 };
+  ler('Extrato').forEach(function (e) {
+    if (String(e.ref) !== String(oc.id)) return;
+    if (e.tipo === 'ganho') {
+      pagos.gastavel += Number(e.gastavel) || 0;
+      pagos.cofrinho += Number(e.cofrinho) || 0;
+    }
+    if (e.tipo === 'estorno') {
+      pagos.gastavel += Number(e.gastavel) || 0;
+      pagos.cofrinho += Number(e.cofrinho) || 0;
+    }
+  });
+
+  if (pagos.gastavel || pagos.cofrinho) {
+    // Saldo negativo confunde: se ela já gastou, o desfazer não cabe mais.
+    var saldo = saldoDe(ler('Extrato'));
+    if (saldo.gastavel - pagos.gastavel < 0 || saldo.cofrinho - pagos.cofrinho < 0) {
+      throw new Error('você já gastou esses pontos');
+    }
+    lancar(cfg, 'estorno', -pagos.gastavel, -pagos.cofrinho,
+      'Desmarcou: ' + oc.titulo, oc.id);
+  }
+
+  escreverLinha('Ocorrencias', oc, { status: 'pendente', marcada_em: '', decidida_em: '' });
+  return { status: 'pendente' };
 }
 
 function acaoDecidir(pessoa, cfg, dados) {
@@ -916,6 +987,7 @@ function acaoSalvarRecompensa(pessoa, cfg, dados) {
 
 var ACOES = {
   marcar: acaoMarcar,
+  desmarcar: acaoDesmarcar,
   salvarTarefa: acaoSalvarTarefa,
   salvarRecompensa: acaoSalvarRecompensa,
   decidir: acaoDecidir,
@@ -1226,9 +1298,15 @@ function listasSuspensas(existentes) {
  * feito — entre as repetidas, fica a mais adiantada.
  */
 function consertar() {
+  // Primeiro os ids: o resto da função tem saídas antecipadas, e id repetido
+  // é justamente o problema que faz uma tarefa sumir da tela dela.
+  var idsTrocados = renomearIdsRepetidos();
+  var sufixo = idsTrocados
+    ? ' ' + idsTrocados + ' tarefa(s) com id repetido receberam id novo.' : '';
+
   var s = aba('Ocorrencias');
   var v = s.getDataRange().getValues();
-  if (v.length < 2) return 'Nada a consertar: não há ocorrências.';
+  if (v.length < 2) return 'Nada a consertar: não há ocorrências.' + sufixo;
 
   var cab = v[0].map(function (c) { return String(c).trim(); });
   var iData = cab.indexOf('data');
@@ -1250,7 +1328,7 @@ function consertar() {
 
   var ficam = Object.keys(melhores).map(function (k) { return melhores[k].linha; });
   var removidas = (v.length - 1) - ficam.length;
-  if (removidas <= 0) return 'Nada repetido: ' + ficam.length + ' ocorrências.';
+  if (removidas <= 0) return 'Nada repetido: ' + ficam.length + ' ocorrências.' + sufixo;
 
   s.deleteRows(2, v.length - 1);
   delete _cache['Ocorrencias'];
@@ -1262,10 +1340,35 @@ function consertar() {
     }));
   }
 
-  var msg = removidas + ' repetidas removidas. Sobraram ' + ficam.length + '.';
+  var msg = removidas + ' repetidas removidas. Sobraram ' + ficam.length + '.' + sufixo;
   Logger.log(msg);
   try { SpreadsheetApp.getUi().alert(msg); } catch (e) {}
   return msg;
+}
+
+/**
+ * Dá id novo a tarefas que compartilham id.
+ *
+ * O gerador antigo de ids colidia, e duas tarefas com o mesmo id faziam a
+ * segunda nunca gerar ocorrência — ela simplesmente não aparecia para ela.
+ * As ocorrências antigas continuam apontando para a primeira; o histórico
+ * fica um pouco impreciso, mas a tarefa volta a funcionar.
+ */
+function renomearIdsRepetidos() {
+  var vistos = {};
+  var trocados = 0;
+  ler('Tarefas').forEach(function (t) {
+    var id = String(t.id || '').trim();
+    if (!id) return;
+    if (vistos[id]) {
+      escrever('Tarefas', t._linha, 'id', novoId('tf'));
+      trocados++;
+    } else {
+      vistos[id] = true;
+    }
+  });
+  if (trocados) marcarGeracaoVencida();
+  return trocados;
 }
 
 /**
@@ -1305,6 +1408,17 @@ function diagnostico() {
       });
       linhas.push('Ocorrências: ' + ocs.length +
         (repetidas ? ' (' + repetidas + ' repetidas — rode Consertar)' : ' (sem repetidas)'));
+
+      var idsTarefa = ler('Tarefas').map(function (t) { return String(t.id); });
+      var idsUnicos = {};
+      var colididos = 0;
+      idsTarefa.forEach(function (id) {
+        if (idsUnicos[id]) colididos++; else idsUnicos[id] = true;
+      });
+      if (colididos) {
+        linhas.push(colididos + ' tarefa(s) com id repetido — rode Consertar. ' +
+          'Tarefa com id repetido não aparece para ela.');
+      }
       var hoje = hojeLocal(config());
       var deHoje = ocs.filter(function (o) { return o.data === hoje; }).length;
       linhas.push('De hoje (' + hoje + '): ' + deHoje +

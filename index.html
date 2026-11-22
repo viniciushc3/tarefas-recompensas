@@ -410,6 +410,19 @@ function marcarLocal(oc) {
   guardarCacheDepois();
 }
 
+/** Desfaz na tela antes de o servidor confirmar, igual ao marcar. */
+function desmarcarLocal(oc) {
+  const creditou = oc.status === 'aprovada' && oc.pontos > 0;
+  oc.status = 'pendente';
+  oc._pendente = true;
+  if (creditou) {
+    const cofre = Math.floor(oc.pontos * (est.cfg.taxaCofrinho || 0.3));
+    est.saldo.gastavel -= oc.pontos - cofre;
+    est.saldo.cofrinho -= cofre;
+  }
+  guardarCacheDepois();
+}
+
 function pedirLocal(rec) {
   const campo = rec.bolso === 'cofrinho' ? 'cofrinho' : 'gastavel';
   est.saldo[campo] -= rec.custo;
@@ -555,6 +568,9 @@ function blocoSaldos() {
 // Desenho da tarefa em três partes, para o toque poder repintar só um cartão
 // em vez de reconstruir a tela inteira.
 const marcavelAgora = o => o.status === 'pendente' || o.status === 'recusada';
+// Desmarcar é o mesmo gesto no sentido contrário. Expirada não: passou do prazo.
+const desmarcavelAgora = o => o.status === 'aprovada' || o.status === 'marcada';
+const tocavel = o => marcavelAgora(o) || desmarcavelAgora(o);
 
 function classesTarefa(o) {
   return 'tarefa ' + (o.status === 'aprovada' ? 'feita'
@@ -585,7 +601,7 @@ function conteudoTarefa(o, atrasada) {
 
 function cardTarefa(o, atrasada) {
   return `<button class="${classesTarefa(o)}" data-oc="${esc(o.id)}"
-    ${atrasada ? 'data-atrasada="1"' : ''} ${marcavelAgora(o) ? '' : 'disabled'}>
+    ${atrasada ? 'data-atrasada="1"' : ''} ${tocavel(o) ? '' : 'disabled'}>
     ${conteudoTarefa(o, atrasada)}</button>`;
 }
 
@@ -593,7 +609,7 @@ function cardTarefa(o, atrasada) {
 function repintarTarefa(botao, o) {
   const atrasada = botao.hasAttribute('data-atrasada');
   botao.className = classesTarefa(o);
-  botao.disabled = !marcavelAgora(o);
+  botao.disabled = !tocavel(o);
   botao.innerHTML = conteudoTarefa(o, atrasada);
 }
 
@@ -627,6 +643,13 @@ function telaHoje(el) {
   if (!doDia.length) {
     html += vazio('🌤️', 'Dia livre!', 'Nenhuma tarefa marcada para hoje.');
   } else {
+    // Uma linha, não um aviso em cada cartão. Sem nenhuma pista ela não
+    // descobre que dá para desfazer, e o toque num cartão feito parecia o app
+    // travado.
+    if (doDia.some(o => desmarcavelAgora(o))) {
+      html += `<p class="muted xs" style="margin:18px 0 -6px">
+        Tocar numa tarefa feita desmarca ela.</p>`;
+    }
     for (const [id, nome] of PERIODOS) {
       const itens = doDia.filter(o => (o.periodo || 'qualquer') === id);
       if (!itens.length) continue;
@@ -649,13 +672,17 @@ function telaHoje(el) {
     b.onclick = () => {
       const oc = est.ocorrencias.find(o => o.id === b.dataset.oc);
       if (!oc) return;
-      marcarLocal(oc);
+
+      // Nenhum dos dois sentidos pede confirmação: cada um desfaz o outro.
+      const desfazendo = desmarcavelAgora(oc);
+      if (desfazendo) desmarcarLocal(oc); else marcarLocal(oc);
+
       // Repinta o cartão e os saldos, e nada mais. Reconstruir a tela inteira
       // aqui era o que fazia o toque demorar quando a lista cresce.
       repintarTarefa(b, oc);
       repintarSaldos();
       atualizarContagem();
-      enfileirar({ acao: 'marcar', id: oc.id });
+      enfileirar({ acao: desfazendo ? 'desmarcar' : 'marcar', id: oc.id });
     };
   });
 }
@@ -780,7 +807,10 @@ function telaMeta(el) {
 }
 
 // ------------------------------------------------------------- Extrato
-const ROTULO_TIPO = { ganho: 'tarefa', gasto: 'resgate', devolucao: 'devolução', ajuste: 'ajuste' };
+const ROTULO_TIPO = {
+  ganho: 'tarefa', gasto: 'resgate', devolucao: 'devolução',
+  ajuste: 'ajuste', estorno: 'desmarcada',
+};
 
 function telaExtrato(el) {
   let html = `<div class="saldos">

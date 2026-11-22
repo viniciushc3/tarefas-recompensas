@@ -172,7 +172,7 @@ function criarAmbiente({ fuso = 'America/Sao_Paulo' } = {}) {
   const criar = new Function(...nomes, fonte + `
     return { instalar, doPost, doGet, config, ler, garantirDias, hojeLocal,
              inicioDaSemana, somarDias, escrever, anexar, saldoDe, diagnostico,
-             procurarAba, consertar, ABAS };
+             procurarAba, consertar, novoId, ABAS };
   `);
   const api = criar(...nomes.map(n => ambiente[n]));
 

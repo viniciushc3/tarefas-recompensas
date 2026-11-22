@@ -600,3 +600,158 @@ test('diagnóstico aponta o dia vazio, que é o sintoma reclamado', () => {
   estado(api, cfg.codigoFilha);
   assert.match(api.diagnostico(), /De hoje \(\d{4}-\d{2}-\d{2}\): [1-9]/);
 });
+
+// ----------------------------------------------------------- desmarcar
+function marcarTudoDeHoje(api, cfg) {
+  const e = estado(api, cfg.codigoFilha);
+  const alvos = e.ocorrencias.filter(o => o.data === e.hoje && o.status === 'pendente');
+  return estado(api, cfg.codigoFilha, alvos.map((o, i) => ({ acao: 'marcar', id: o.id, ref: i })));
+}
+
+test('desmarcar devolve exatamente os pontos que a tarefa pagou', () => {
+  const { api, cfg } = montar();
+  const e = estado(api, cfg.codigoFilha);
+  const oc = e.ocorrencias.find(o => o.data === e.hoje && o.pontos === 20 && !o.precisa_aprovacao);
+
+  let r = estado(api, cfg.codigoFilha, [{ acao: 'marcar', id: oc.id, ref: 0 }]);
+  assert.deepEqual(r.saldo, { gastavel: 14, cofrinho: 6 });
+
+  r = estado(api, cfg.codigoFilha, [{ acao: 'desmarcar', id: oc.id, ref: 0 }]);
+  assert.equal(r.resultados[0].ok, true, r.resultados[0].erro);
+  assert.deepEqual(r.saldo, { gastavel: 0, cofrinho: 0 }, 'não devolveu');
+  assert.equal(r.ocorrencias.find(o => o.id === oc.id).status, 'pendente');
+});
+
+test('remarcar depois de desmarcar paga de novo', () => {
+  // A trava de crédito duplo olhava "existe ganho?". Como o extrato só cresce,
+  // o ganho estornado continuava lá e a segunda marcação não pagaria nada.
+  const { api, cfg } = montar();
+  const e = estado(api, cfg.codigoFilha);
+  const oc = e.ocorrencias.find(o => o.data === e.hoje && o.pontos === 20 && !o.precisa_aprovacao);
+
+  estado(api, cfg.codigoFilha, [{ acao: 'marcar', id: oc.id, ref: 0 }]);
+  estado(api, cfg.codigoFilha, [{ acao: 'desmarcar', id: oc.id, ref: 0 }]);
+  const r = estado(api, cfg.codigoFilha, [{ acao: 'marcar', id: oc.id, ref: 0 }]);
+
+  assert.deepEqual(r.saldo, { gastavel: 14, cofrinho: 6 }, 'a remarcação não pagou');
+  // E não pagou duas vezes.
+  estado(api, cfg.codigoFilha, [{ acao: 'marcar', id: oc.id, ref: 0 }]);
+  assert.deepEqual(estado(api, cfg.codigoFilha).saldo, { gastavel: 14, cofrinho: 6 });
+});
+
+test('desmarcar tarefa que espera aprovação não mexe em saldo', () => {
+  const { api, cfg } = montar();
+  const e = estado(api, cfg.codigoFilha);
+  const oc = e.ocorrencias.find(o => o.data === e.hoje && o.precisa_aprovacao);
+
+  estado(api, cfg.codigoFilha, [{ acao: 'marcar', id: oc.id, ref: 0 }]);
+  const r = estado(api, cfg.codigoFilha, [{ acao: 'desmarcar', id: oc.id, ref: 0 }]);
+  assert.equal(r.resultados[0].ok, true, r.resultados[0].erro);
+  assert.deepEqual(r.saldo, { gastavel: 0, cofrinho: 0 });
+  assert.equal(r.ocorrencias.find(o => o.id === oc.id).status, 'pendente');
+  // e some da fila do pai
+  assert.equal(estado(api, cfg.codigoPai).ocorrencias
+    .filter(o => o.status === 'marcada').length, 0);
+});
+
+test('não dá para desmarcar pontos que já foram gastos', () => {
+  const { api, cfg } = montar();
+  let e = marcarTudoDeHoje(api, cfg);
+  const gastavelAntes = e.saldo.gastavel;
+  assert.ok(gastavelAntes >= 30);
+
+  const tela = e.recompensas.find(r => r.custo === 30 && r.tipo === 'tela');
+  e = estado(api, cfg.codigoFilha, [{ acao: 'pedir', id: tela.id, ref: 0 }]);
+
+  // tenta desfazer tarefas até o saldo não cobrir mais
+  const feitas = e.ocorrencias.filter(o => o.status === 'aprovada' && o.pontos > 0);
+  let recusou = false;
+  feitas.forEach((o, i) => {
+    const r = estado(api, cfg.codigoFilha, [{ acao: 'desmarcar', id: o.id, ref: i }]);
+    if (!r.resultados[0].ok) {
+      assert.match(r.resultados[0].erro, /já gastou/);
+      recusou = true;
+    }
+  });
+  assert.ok(recusou, 'deixou o saldo ficar negativo');
+  assert.ok(estado(api, cfg.codigoFilha).saldo.gastavel >= 0, 'saldo negativo');
+});
+
+test('desmarcar o que não está marcado, ou fora do prazo, é recusado', () => {
+  const { api, cfg, hoje } = montar();
+  const e = estado(api, cfg.codigoFilha);
+  const pendente = e.ocorrencias.find(o => o.status === 'pendente');
+
+  let r = estado(api, cfg.codigoFilha, [{ acao: 'desmarcar', id: pendente.id, ref: 0 }]);
+  assert.match(r.resultados[0].erro, /não está marcada/);
+
+  // marca e joga para fora da janela
+  estado(api, cfg.codigoFilha, [{ acao: 'marcar', id: pendente.id, ref: 0 }]);
+  const linha = api.ler('Ocorrencias').find(x => x.id === pendente.id);
+  api.escrever('Ocorrencias', linha._linha, 'data', api.somarDias(hoje, -5));
+
+  r = estado(api, cfg.codigoFilha, [{ acao: 'desmarcar', id: pendente.id, ref: 0 }]);
+  assert.match(r.resultados[0].erro, /prazo/);
+});
+
+test('desmarcar tira do percentual da semana', () => {
+  const { api, cfg } = montar();
+  const antes = estado(api, cfg.codigoFilha).resumoSemana;
+  const e = marcarTudoDeHoje(api, cfg);
+  assert.ok(e.resumoSemana.aprovadas > antes.aprovadas);
+
+  const feita = e.ocorrencias.find(o => o.status === 'aprovada' && o.conta_mesada);
+  const r = estado(api, cfg.codigoFilha, [{ acao: 'desmarcar', id: feita.id, ref: 0 }]);
+  assert.equal(r.resumoSemana.aprovadas, e.resumoSemana.aprovadas - 1);
+});
+
+test('ids não colidem, nem gerados em rajada', () => {
+  // Regressão: o id era milissegundo + aleatório de 1296 valores. instalar()
+  // cria 19 linhas e garantirDias() até 165, tudo no mesmo milissegundo, e
+  // duas colidiam. O sintoma era uma tarefa que simplesmente nunca aparecia.
+  const { api, cfg } = montar();
+  estado(api, cfg.codigoFilha);
+
+  const confere = (rotulo, ids) => {
+    assert.equal(new Set(ids).size, ids.length,
+      rotulo + ': ' + (ids.length - new Set(ids).size) + ' id(s) repetido(s)');
+  };
+  confere('Tarefas', api.ler('Tarefas').map(t => String(t.id)));
+  confere('Recompensas', api.ler('Recompensas').map(r => String(r.id)));
+  confere('Ocorrencias', api.ler('Ocorrencias').map(o => String(o.id)));
+
+  // E toda tarefa ativa de hoje virou exatamente uma ocorrência.
+  const e = estado(api, cfg.codigoFilha);
+  const porTarefa = {};
+  e.ocorrencias.filter(o => o.data === e.hoje).forEach(o => {
+    porTarefa[o.titulo] = (porTarefa[o.titulo] || 0) + 1;
+  });
+  Object.keys(porTarefa).forEach(t => assert.equal(porTarefa[t], 1, t + ' duplicou'));
+});
+
+test('mil ids seguidos são todos diferentes', () => {
+  const api = criarAmbiente();
+  api.instalar();
+  const ids = [];
+  for (let i = 0; i < 1000; i++) ids.push(api.novoId('x'));
+  assert.equal(new Set(ids).size, 1000);
+});
+
+test('consertar devolve id próprio a tarefa que perdeu o dela', () => {
+  const { api, cfg } = montar();
+  const tarefas = api.ler('Tarefas');
+  // Força a colisão que o gerador antigo produzia.
+  api.escrever('Tarefas', tarefas[1]._linha, 'id', String(tarefas[0].id));
+
+  assert.match(api.diagnostico(), /id repetido/);
+  assert.match(api.consertar(), /id repetido receberam id novo/);
+
+  const ids = api.ler('Tarefas').map(t => String(t.id));
+  assert.equal(new Set(ids).size, ids.length);
+
+  // E a tarefa que estava invisível volta a gerar ocorrência.
+  const e = estado(api, cfg.codigoFilha);
+  const titulo = tarefas[1].titulo;
+  assert.ok(e.ocorrencias.some(o => o.titulo === titulo && o.data === e.hoje),
+    'a tarefa continuou sem aparecer: ' + titulo);
+});
