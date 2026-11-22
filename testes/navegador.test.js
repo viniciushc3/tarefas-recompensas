@@ -167,3 +167,49 @@ test('código errado não entra', async (t) => {
     null, { timeout: 10000 });
   assert.ok(await pagina.locator('#entrar').isVisible(), 'não deveria ter entrado');
 });
+
+test('com a planilha inchada, o toque continua instantâneo', async (t) => {
+  const api = criarAmbiente();
+  api.instalar();
+  const cfg = api.config();
+
+  // Reproduz a bagunça que o bug das datas deixou: o gerador rodando de novo a
+  // cada abertura, por semanas. Foi o que deixou o app dela lento.
+  const base = api.ler('Ocorrencias');
+  for (let volta = 0; volta < 150; volta++) {
+    base.forEach(o => api.anexar('Ocorrencias', {
+      id: 'dup-' + volta + '-' + o.id, data: o.data, tarefa_id: o.tarefa_id,
+      titulo: o.titulo, icone: o.icone, pontos: o.pontos, tipo: o.tipo,
+      periodo: o.periodo, conta_mesada: 'sim', precisa_aprovacao: o.precisa_aprovacao,
+      status: 'pendente',
+    }));
+  }
+  assert.ok(api.ler('Ocorrencias').length > 1000,
+    'a planilha de teste deveria estar inchada: ' + api.ler('Ocorrencias').length);
+
+  const servidor = await subirServidor(api);
+  const url = 'http://127.0.0.1:' + servidor.address().port;
+  const navegador = await chromium.launch();
+  t.after(async () => { await navegador.close(); servidor.close(); });
+
+  const ctx = await navegador.newContext({ viewport: { width: 390, height: 844 } });
+  const pagina = await ctx.newPage();
+  const erros = await abrir(pagina, url, cfg.codigoFilha);
+  assert.deepEqual(erros, []);
+
+  // O servidor tem de entregar a lista já limpa, mesmo com a planilha suja.
+  const quantas = await pagina.evaluate(
+    () => JSON.parse(localStorage.getItem('tr.cache')).ocorrencias.length);
+  assert.ok(quantas < 40, 'a resposta veio com ' + quantas + ' ocorrências — repetidas passaram');
+
+  const alvo = pagina.locator('.tarefa:not([disabled])').first();
+  const inicio = Date.now();
+  await alvo.click();
+  await pagina.waitForSelector('.tarefa.feita, .tarefa.esperando', { timeout: 5000 });
+  const demora = Date.now() - inicio;
+
+  // O desenho não pode esperar a rede nem a gravação do estado. Qualquer coisa
+  // acima disto é a sensação de "ele vai na planilha antes de marcar".
+  assert.ok(demora < 400, 'o toque levou ' + demora + 'ms para aparecer na tela');
+  console.log('      toque -> visto na tela: ' + demora + 'ms');
+});

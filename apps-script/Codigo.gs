@@ -26,6 +26,9 @@ var ABAS = {
   Semanas:     ['semana', 'elegiveis', 'aprovadas', 'pct', 'valor', 'status']
 };
 
+/** Qual status "ganha" quando a mesma tarefa-dia aparece repetida. */
+var PESO_STATUS = { aprovada: 5, marcada: 4, recusada: 3, pendente: 2, expirada: 1 };
+
 // =====================================================================
 // REGRAS PURAS
 // Sem SpreadsheetApp aqui: é o que os testes em testes/regras.test.js
@@ -514,7 +517,29 @@ function expirarVencidas(cfg, hoje) {
 // --------------------------------------------------------------- estado
 function montarEstado(pessoa, cfg) {
   var hoje = hojeLocal(cfg);
-  var ocorrencias = ler('Ocorrencias').map(function (o) {
+
+  // Janela curta e sem repetidas.
+  //
+  // A tela precisa de ~30 dias (o streak) e mais nada. Mandar o histórico
+  // inteiro engorda a resposta, e o celular dela grava isso no armazenamento
+  // local a cada toque — com planilha bagunçada vira meio segundo de trava
+  // por clique. A limpeza aqui também protege de uma planilha que ainda não
+  // passou pelo consertar().
+  var limiteJanela = somarDias(hoje, -35);
+  var melhores = {};
+  ler('Ocorrencias').forEach(function (o) {
+    var data = String(o.data);
+    if (data < limiteJanela || data > hoje) return;
+    var chave = o.tarefa_id + '|' + data;
+    var peso = PESO_STATUS[String(o.status).trim()] || 0;
+    if (!melhores[chave] || peso > melhores[chave]._peso) {
+      o._peso = peso;
+      melhores[chave] = o;
+    }
+  });
+
+  var ocorrencias = Object.keys(melhores).map(function (k) { return melhores[k]; })
+    .map(function (o) {
     return {
       id: o.id, data: String(o.data), titulo: o.titulo, icone: o.icone,
       pontos: Number(o.pontos) || 0, tipo: o.tipo,
@@ -579,10 +604,7 @@ function montarEstado(pessoa, cfg) {
       return p ? tarefasParaAlcancar(resumo, p.min_pct) : null;
     })(),
     faixas: faixas,
-    // Só o que a tela usa: a janela de atraso para ela, tudo recente para você.
-    ocorrencias: ocorrencias.filter(function (o) {
-      return diferencaEmDias(o.data, hoje) <= 40;
-    }),
+    ocorrencias: ocorrencias,
     recompensas: recompensas,
     // Para a tela de edição: tudo, inclusive desativado. Só para o pai — a
     // filha não precisa ver o que está fora da loja.
@@ -1203,8 +1225,6 @@ function listasSuspensas(existentes) {
  * gerava o dia inteiro de novo. Isto limpa a bagunça sem perder o que foi
  * feito — entre as repetidas, fica a mais adiantada.
  */
-var PESO_STATUS = { aprovada: 5, marcada: 4, recusada: 3, pendente: 2, expirada: 1 };
-
 function consertar() {
   var s = aba('Ocorrencias');
   var v = s.getDataRange().getValues();

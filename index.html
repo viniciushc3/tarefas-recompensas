@@ -246,6 +246,24 @@ function status(txt, s) {
 function guardar(chave, valor) {
   try { localStorage.setItem(chave, JSON.stringify(valor)); } catch {}
 }
+
+/**
+ * Guarda o estado fora do caminho do toque.
+ *
+ * JSON.stringify do estado inteiro + localStorage.setItem é síncrono e trava a
+ * tela enquanto roda. Fazer isso a cada clique era o que dava a sensação de
+ * "ele vai na planilha antes de marcar". O que importa é a tela responder; o
+ * armazenamento pode esperar o navegador ficar ocioso.
+ */
+let timerCache = null;
+function guardarCacheDepois() {
+  clearTimeout(timerCache);
+  timerCache = setTimeout(() => guardar(CACHE, est), 400);
+}
+// Se ela fechar o app antes disso, grava na hora.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && est) { clearTimeout(timerCache); guardar(CACHE, est); }
+});
 function recuperar(chave, padrao) {
   try { return JSON.parse(localStorage.getItem(chave)) ?? padrao; } catch { return padrao; }
 }
@@ -389,7 +407,7 @@ function marcarLocal(oc) {
     est.saldo.gastavel += oc.pontos - cofre;
     est.saldo.cofrinho += cofre;
   }
-  guardar(CACHE, est);
+  guardarCacheDepois();
 }
 
 function pedirLocal(rec) {
@@ -399,7 +417,7 @@ function pedirLocal(rec) {
     id: 'local-' + Date.now(), quando: '', titulo: rec.titulo, custo: rec.custo,
     bolso: rec.bolso, minutos: rec.minutos, status: 'pedido', _pendente: true,
   });
-  guardar(CACHE, est);
+  guardarCacheDepois();
 }
 
 // ------------------------------------------------------------- entrada
@@ -490,6 +508,13 @@ function render() {
   mostrarStatus();
 }
 
+function atualizarContagem() {
+  const sub = document.getElementById('subtitulo');
+  if (sub && est.papel !== 'pai') {
+    sub.textContent = rotuloDia(est.hoje, est.hoje) + ' · ' + contarHoje();
+  }
+}
+
 function contarHoje() {
   const h = est.ocorrencias.filter(o => o.data === est.hoje);
   const feitas = h.filter(o => o.status === 'aprovada' || o.status === 'marcada').length;
@@ -511,12 +536,12 @@ function blocoSaldos() {
   return `<div class="saldos">
     <div class="saldo g">
       <div class="rot">PARA GASTAR</div>
-      <div class="val">${gastavel}</div>
-      ${min !== null ? `<div class="eq">≈ ${min} min de tela</div>` : ''}
+      <div class="val" data-saldo="gastavel">${gastavel}</div>
+      ${min !== null ? `<div class="eq" data-saldo="minutos">≈ ${min} min de tela</div>` : ''}
     </div>
     <div class="saldo c">
       <div class="rot">COFRINHO</div>
-      <div class="val">${cofrinho}</div>
+      <div class="val" data-saldo="cofrinho">${cofrinho}</div>
       ${meta ? `<div class="eq">${Math.round(fr * 100)}% da meta</div>
         <div class="barra c" style="margin-top:5px;height:6px"><div style="width:${fr * 100}%"></div></div>` : ''}
     </div>
@@ -527,12 +552,20 @@ function blocoSaldos() {
 }
 
 // ---------------------------------------------------------------- Hoje
-function cardTarefa(o, atrasada) {
+// Desenho da tarefa em três partes, para o toque poder repintar só um cartão
+// em vez de reconstruir a tela inteira.
+const marcavelAgora = o => o.status === 'pendente' || o.status === 'recusada';
+
+function classesTarefa(o) {
+  return 'tarefa ' + (o.status === 'aprovada' ? 'feita'
+    : o.status === 'marcada' ? 'esperando'
+    : o.status === 'recusada' ? 'recusada' : '');
+}
+
+function conteudoTarefa(o, atrasada) {
   const feita = o.status === 'aprovada';
   const esperando = o.status === 'marcada';
   const recusada = o.status === 'recusada';
-  const marcavel = o.status === 'pendente' || recusada;
-  const cls = feita ? 'feita' : esperando ? 'esperando' : recusada ? 'recusada' : '';
 
   const tags = [];
   if (o.pontos > 0) tags.push(`<span class="chip acc">+${o.pontos}</span>`);
@@ -540,16 +573,40 @@ function cardTarefa(o, atrasada) {
   if (esperando) tags.push('<span class="chip warn">esperando confirmação</span>');
   if (recusada) tags.push('<span class="chip bad">recusada · pode marcar de novo</span>');
   if (o._pendente) tags.push('<span class="chip warn">⏱ vai sincronizar</span>');
-  if (atrasada && marcavel) tags.push('<span class="chip warn">atrasada</span>');
+  if (atrasada && marcavelAgora(o)) tags.push('<span class="chip warn">atrasada</span>');
 
-  return `<button class="tarefa ${cls}" data-oc="${esc(o.id)}" ${marcavel ? '' : 'disabled'}>
-    <span class="box">${feita ? '✓' : esperando ? '⏳' : ''}</span>
+  return `<span class="box">${feita ? '✓' : esperando ? '⏳' : ''}</span>
     <span class="ico">${esc(o.icone || '⭐')}</span>
     <span class="grow">
       <div class="tit">${esc(o.titulo)}</div>
       <div class="tags">${tags.join('')}</div>
-    </span>
-  </button>`;
+    </span>`;
+}
+
+function cardTarefa(o, atrasada) {
+  return `<button class="${classesTarefa(o)}" data-oc="${esc(o.id)}"
+    ${atrasada ? 'data-atrasada="1"' : ''} ${marcavelAgora(o) ? '' : 'disabled'}>
+    ${conteudoTarefa(o, atrasada)}</button>`;
+}
+
+/** Repinta um cartão só. É isso que faz o toque parecer instantâneo. */
+function repintarTarefa(botao, o) {
+  const atrasada = botao.hasAttribute('data-atrasada');
+  botao.className = classesTarefa(o);
+  botao.disabled = !marcavelAgora(o);
+  botao.innerHTML = conteudoTarefa(o, atrasada);
+}
+
+/** Atualiza os números do topo sem redesenhar nada em volta. */
+function repintarSaldos() {
+  const g = document.querySelector('[data-saldo="gastavel"]');
+  const c = document.querySelector('[data-saldo="cofrinho"]');
+  if (g) g.textContent = est.saldo.gastavel;
+  if (c) c.textContent = est.saldo.cofrinho;
+  const eq = document.querySelector('[data-saldo="minutos"]');
+  if (eq && est.porMinuto > 0) {
+    eq.textContent = `≈ ${Math.floor(est.saldo.gastavel / est.porMinuto)} min de tela`;
+  }
 }
 
 function telaHoje(el) {
@@ -593,8 +650,12 @@ function telaHoje(el) {
       const oc = est.ocorrencias.find(o => o.id === b.dataset.oc);
       if (!oc) return;
       marcarLocal(oc);
+      // Repinta o cartão e os saldos, e nada mais. Reconstruir a tela inteira
+      // aqui era o que fazia o toque demorar quando a lista cresce.
+      repintarTarefa(b, oc);
+      repintarSaldos();
+      atualizarContagem();
       enfileirar({ acao: 'marcar', id: oc.id });
-      render();
     };
   });
 }
