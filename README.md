@@ -50,10 +50,17 @@ supabase/migrations/0001_init.sql
 supabase/migrations/0002_storage.sql
 ```
 
-3. Em **Authentication → Users**, crie dois usuários com e-mail e senha: o seu e
-   o dela. Copie os dois UUIDs.
+3. Em **Authentication → Users → Add user**, crie dois usuários com e-mail e
+   senha: o seu e o dela. O e-mail pode ser inventado (`pai@casa.local`), já que
+   ninguém recebe mensagem nele — mas **marque "Auto Confirm User"**, senão o
+   login não funciona. Copie os dois UUIDs.
 
-4. Cole os UUIDs no topo de `supabase/seed.sql` e rode o arquivo no SQL Editor.
+4. Abra `supabase/seed.sql`, cole os dois UUIDs nas duas linhas marcadas no topo,
+   e rode o arquivo inteiro no SQL Editor. Ele é um bloco único, então roda igual
+   no painel e no `psql`. Se você esquecer de colar, ele falha dizendo isso.
+
+   Rode **uma vez**: a família e as faixas são idempotentes, mas tarefas e
+   recompensas duplicariam.
 
 5. Em **Project Settings → API**, copie a URL do projeto e a chave `anon`.
 
